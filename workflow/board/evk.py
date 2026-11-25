@@ -21,6 +21,7 @@ from pathlib import Path
 import serial
 
 PROMPT = "=> "
+SHELL_PROMPT = r"root@[\w.-]+:[^\n]*# $"   # debug-tweaks images log root in without a password
 FW_PROMPT = r"\n>[>\s]*$"             # Flash Writer prompt; a trailing CR LF of a sent file can add a second ">"
 PORT = "/dev/rzg3l-evk-console"       # udev symlink from setup-host.sh
 LOADADDR = 0x58000000                  # CONFIG_SYS_LOAD_ADDR; U-Boot reports 896 MiB of DRAM from 0x40000000
@@ -400,3 +401,48 @@ class Console:
                     raise BoardError(f"read-back of {c['file']} (sector {c['sector']:#x}): "
                                      f"crc32 {got:08x} != {c['crc32']:08x}")
             print(f"verify: all {len(man['chunks'])} chunks read back with matching CRC32 ({time.time() - t1:.0f}s)")
+
+    # ---- Linux on the board (serial console; the images have debug-tweaks: root without password) ----
+    def linux_shell(self, wait: float) -> None:
+        """Get to a root shell: from the shell, the login prompt, U-Boot (boot) or a powered-off board."""
+        self.buf = ""
+        self.send("\r")
+        try:
+            i, _ = self.expect([SHELL_PROMPT, r"login: $", re.escape(PROMPT) + r"$"], 3)
+        except TimeoutError:
+            human("给 EVK 上电（eMMC 启动：SW_MODE[1:3] = ON OFF OFF），工具会等到 Linux 的登录提示。")
+            i, _ = self.expect([SHELL_PROMPT, r"login: $"], wait)
+        if i == 2:                                   # U-Boot prompt: boot with the default command
+            self.send("boot\r")
+            i, _ = self.expect([SHELL_PROMPT, r"login: $"], wait)
+        if i == 1:
+            self.login()
+
+    def login(self) -> None:
+        self.buf = ""
+        self.send("root\r")
+        i, _ = self.expect([SHELL_PROMPT, r"Password: $"], 30)
+        if i == 1:
+            raise BoardError("the image asks for a password: evk-verify needs an image with debug-tweaks")
+
+    def linux_cmd(self, cmd: str, timeout: float = 30) -> tuple[int, str]:
+        """Run a shell command; return (exit status, output). The end is found by a marker with the status."""
+        mark = f"__RZ{int(time.time() * 1000) % 100000:05d}__"
+        self.buf = ""
+        self.send(f"{cmd}; echo {mark}$?\r")
+        _, text = self.expect([rf"\n{mark}(\d+)\s*\n[\s\S]*?{SHELL_PROMPT}"], timeout)
+        m = re.search(rf"\n{mark}(\d+)", text)
+        body = text[:m.start()]
+        body = body.split("\n", 1)[1] if "\n" in body else ""      # drop the echoed command line
+        return int(m.group(1)), body.strip("\n")
+
+    def reboot_timed(self, timeout: float) -> dict:
+        """reboot from the shell; seconds until the U-Boot banner, 'Starting kernel' and the login prompt."""
+        self.buf = ""
+        t0 = time.time()
+        self.send("reboot\r")
+        times = {}
+        for key, rx in (("u_boot", r"U-Boot 20\d\d"), ("kernel", r"Starting kernel"), ("login", r"login: $")):
+            self.expect([rx], timeout)
+            times[key] = round(time.time() - t0, 1)
+        return times

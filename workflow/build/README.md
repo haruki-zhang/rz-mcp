@@ -8,6 +8,7 @@
 | `poc-use --capture <poc>` | 反过来：从当前的 `build/conf` 提取出 `<poc>/build-conf`，适用于原来手工配置的 PoC |
 | `poc-use --baseline` | 只用官方模板和标准项 |
 | `poc-build <target> [--task populate_sdk]` | 在 `max-ubuntu22.04` 容器里以 `nice` 运行 bitbake（主机是 26.04，BSP 只在 22.04 上测过）。会写 `data/build-runs/<时间>-<target>/`，里面有 `bitbake.log` 和 `report.json`：使用的配置、任务统计、错误、新生成的文件 |
+| `poc-env <命令…>` | 在容器里加载 BitBake 环境后执行一条命令，例如 `devtool modify linux-renesas`、`devtool finish linux-renesas ../rzg3l-<名称>/layers/meta-rzg3l-<名称>`、`bitbake -e`。参数以列表的形式原样传入，不经过 shell。bitbake 正在运行时，拒绝执行 bitbake 和 devtool 命令 |
 | `poc-package <poc> --image <x>.wic.gz` | 生成 `<poc>/dist/<repo>-<版本>/`，内容是 README、docs（md 和 pdf）、layers、image、tools，另加 `versions.json` 和 `SHA256SUMS`。不包含 `design/`、`build-conf/`、`.git`。仓库还是空骨架时拒绝打包 |
 
 ## build-conf 的格式

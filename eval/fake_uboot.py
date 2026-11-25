@@ -10,6 +10,7 @@ Storage is sparse files: `sd` = mmc 0 (eMMC user area when mmc_type="MMC"), `boo
 """
 import os
 import pty
+import re
 import select
 import threading
 import time
@@ -32,6 +33,8 @@ EMW_MENU = ("EM_W Start --------------\n----------------------------------------
             "  eMMC Sector Cnt : H'0 - H'0000FBFF\n 2:Boot Partition 2      : 32256 KBytes\n"
             "  eMMC Sector Cnt : H'0 - H'0000FBFF\n---------------------------------------------------------\n"
             "  Select area(0-2)>")
+SHELL = "root@smarc-rzg3l:~# "
+LOGIN = "smarc-rzg3l login: "
 UBOOT_BOOT = ("\nNOTICE:  BL2: v2.10.5(release):2.10.5/rzg3l_1.0.1-dirty\nNOTICE:  BL2: Built : 17:45:57, May  6 2026\n"
               "NOTICE:  BL31: v2.10.5(release):2.10.5/rzg3l_1.0.1-dirty\n\nU-Boot 2024.07 (Jun 22 2026 - 12:52:03 +0000)\n\n"
               "DRAM:  1.9 GiB\nMMC:   sd@11c00000: 0, sd@11c10000: 1\nNet:   \n"
@@ -56,7 +59,7 @@ def sparse(path: Path | None, size: int) -> None:
 class FakeUBoot:
     def __init__(self, tftp_root: Path, sd: Path, sd_size: int = 2 << 30, eth_ok: str = "eth1", mmc_type: str = "MMC",
                  state: str = "off", corrupt_first_tftp: bool = False, boot1: Path | None = None,
-                 qspi: Path | None = None, no_mac: bool = True):
+                 qspi: Path | None = None, no_mac: bool = True, linux_cmds: dict | None = None):
         self.master, slave = pty.openpty()
         tty.setraw(slave)
         self.port, self._slave = os.ttyname(slave), slave
@@ -71,7 +74,8 @@ class FakeUBoot:
         self.env, self.mem, self.writes, self.reads = {}, {}, 0, 0
         self.line, self.stop, self.prev = "", False, ""
         self.fw = {"step": "cmd", "lines": []}
-        self.state = state                    # off | bootrom | fw | countdown | prompt | rebooting | linux
+        self.linux_cmds = linux_cmds or {}      # shell command -> (output, exit status)
+        self.state = state                    # off | bootrom | fw | countdown | prompt | rebooting | login | shell
         if state == "prompt":
             self.env = self._uboot_env()
         self.lock = threading.Lock()
@@ -102,7 +106,10 @@ class FakeUBoot:
             r, _, _ = select.select([self.master], [], [], 0.05)
             data = os.read(self.master, 65536).decode(errors="replace") if r else ""
             with self.lock:
-                if self.state in ("off", "linux", "rebooting"):
+                if self.state in ("off", "rebooting"):
+                    continue
+                if self.state in ("login", "shell"):
+                    self._linux(data)
                     continue
                 if self.state in ("bootrom", "fw"):
                     self._flash_writer(data)
@@ -112,8 +119,8 @@ class FakeUBoot:
                         self.out("\n=> ")
                         self.state = "prompt"
                     elif time.time() - self.countdown > 1.0:     # nobody stopped autoboot
-                        self.out("\nStarting kernel ...\n\nsmarc-rzg3l login: ")
-                        self.state = "linux"
+                        self.out("\nStarting kernel ...\n\n" + LOGIN)
+                        self.state = "login"
                     continue
                 for ch in data:
                     if ch == "\x03":
@@ -134,8 +141,46 @@ class FakeUBoot:
 
     def _reboot(self) -> None:
         with self.lock:
-            self.out(UBOOT_BOOT + "\nStarting kernel ...\n\nsmarc-rzg3l login: ")
-            self.state = "linux"
+            self.out(UBOOT_BOOT + "\nStarting kernel ...\n\n" + LOGIN)
+            self.state = "login"
+
+    # ------------------------------------------------------------ Linux (login prompt, root shell)
+    def _linux(self, data: str) -> None:
+        for ch in data:
+            if ch == "\x03":
+                self.line = ""
+                self.out("^C\n" + (SHELL if self.state == "shell" else LOGIN))
+            elif ch == "\r":
+                line, self.line = self.line.strip(), ""
+                self.out("\n")
+                if self.state == "login":
+                    if line == "root":
+                        self.state = "shell"
+                        self.out(SHELL)
+                    else:
+                        self.out(LOGIN)
+                else:
+                    self._shell(line)
+                    if self.state != "shell":
+                        break
+            elif ch != "\n":
+                self.line += ch
+                self.out(ch)
+
+    def _shell(self, line: str) -> None:
+        m = re.match(r"(.*); echo (__RZ\d+__)\$\?$", line)
+        cmd, mark = (m.group(1).strip(), m.group(2)) if m else (line, None)
+        if cmd == "reboot":
+            self.out("reboot: Restarting system\n")
+            self.state = "rebooting"
+            threading.Timer(1.0, self._reboot).start()
+            return
+        out, rc = self.linux_cmds.get(cmd, (f"sh: {cmd.split()[0]}: not found", 127)) if cmd else ("", 0)
+        if out:
+            self.out(out + "\n")
+        if mark:
+            self.out(f"{mark}{rc}\n")
+        self.out(SHELL)
 
     # ------------------------------------------------------------ BootROM + Flash Writer
     def _flash_writer(self, data: str) -> None:

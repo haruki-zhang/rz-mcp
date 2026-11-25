@@ -1,0 +1,40 @@
+#!/usr/bin/env python3
+"""Run one command in the build container with the BitBake environment (step 5), e.g. devtool.
+
+    workflow/build/poc-env devtool modify linux-renesas
+    workflow/build/poc-env devtool finish linux-renesas ../rzg3l-<name>/layers/meta-rzg3l-<name>
+    workflow/build/poc-env bitbake -e linux-renesas
+
+The arguments are passed as a list (no shell). bitbake and devtool commands are refused while another bitbake
+holds the build directory. The working directory is the build directory (as after oe-init-build-env).
+"""
+import shlex
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(ROOT / "src"))
+from rzmcp import yocto as Y  # noqa: E402
+
+CONTAINER = "max-ubuntu22.04"
+
+
+def main() -> None:
+    args = sys.argv[1:]
+    if not args or args[0] in ("-h", "--help"):
+        print(__doc__)
+        sys.exit(0 if args else 2)
+    project = Y.project_dir().resolve()
+    if args[0] in ("bitbake", "devtool", "bitbake-layers") and Y.bitbake_busy(project / "build"):
+        sys.exit("bitbake is running in this build directory; wait for it to finish")
+    r = subprocess.run(["docker", "inspect", "-f", "{{.State.Running}}", CONTAINER], capture_output=True, text=True)
+    if r.stdout.strip() != "true":
+        subprocess.run(["docker", "start", CONTAINER], check=True, stdout=subprocess.DEVNULL)
+    # oe-init-build-env needs bash; the command itself is passed through "$@" untouched
+    script = f'cd {shlex.quote(str(project))} && source poky/oe-init-build-env build >/dev/null && exec "$@"'
+    sys.exit(subprocess.run(["docker", "exec", "-i", CONTAINER, "bash", "-c", script, "poc-env", *args]).returncode)
+
+
+if __name__ == "__main__":
+    main()

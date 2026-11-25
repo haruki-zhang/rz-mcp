@@ -200,12 +200,12 @@ def build_server() -> MCPServer:
         component revisions and git mirrors, whether bitbake is running."""
         return B.check_build_env()
 
-    @mcp.prompt(name="poc", title="RZ/G3L PoC workflow (steps 1-4)",
-                description="推进 RZ/G3L PoC 工作流的第 1～4 步：设想 → v1/v2 → 两轨方案 → 融合 → 用户对齐。"
+    @mcp.prompt(name="poc", title="RZ/G3L PoC workflow (steps 1-6)",
+                description="推进 RZ/G3L PoC 工作流的第 1～6 步：设想 → v1/v2 → 两轨方案 → 融合 → 对齐 → 实现、构建 → 写板子、验证 → 打包。"
                             "参数：PoC 名称（一个词，例如 lowpower-display）。每完成一步再运行一次即可继续。")
     @_logged
     def poc(name: str) -> str:
-        """Steps 1-4 of the PoC workflow; reads the PoC repository state and returns the next step."""
+        """Steps 1-6 of the PoC workflow; reads the PoC repository state and returns the next step."""
         return W.poc_prompt(name)
 
     return mcp

@@ -15,6 +15,7 @@
 | `evk-flash` | 命令入口：`doctor`、`bootloader`、`rootfs`、`emmc`、`clean` |
 | `media.py` | eMMC 和 QSPI 的写入地址、EXT_CSD、开关设置，**所有地址只写在这一处**，每个值都注明了出处 |
 | `evk.py` | 串口控制台（独占、带日志）、BootROM 和 Flash Writer（SUP、EM_W、XLS2、em_secsd）、U-Boot（MMC、网络、TFTP、CRC32）的操作 |
+| `evk-verify <poc>` | 执行 `design/verify.toml`（由 `01-design.md` 第 11 节写成），每个验证项有三种执行位置：`linux`（通过串口以 root 登录后执行命令）、`host`（在主机上执行命令）、`boot`（重启后测到 U-Boot、Starting kernel、login 各自的时间）。只按 `expect`、`expect_rc`、`max_seconds` 判定。从板子输出里提取的值可以用于后面的命令；用在主机命令里时，只接受安全字符，并且会加引号。结果写入 `design/03-verification.md` 和 `design/verify-logs/` |
 | `setup-host.sh` | 主机配置，**用 sudo 运行一次**：串口 udev 规则、USB 网卡的固定 IP、dnsmasq（只在 USB 网卡上提供 DHCP 和 TFTP）、`/srv/tftp`。加 `--undo` 撤销 |
 
 ## 用法

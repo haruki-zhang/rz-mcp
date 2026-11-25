@@ -296,6 +296,11 @@ Tesera 是 RZ/G2L 客户板的 bring-up（`MACHINE=rzg2l-tlc-01`，VLP v4.0.2，
   - `poc-package` 打包 rzg3l-lowpower-display，目录结构和它本身一致，`SHA256SUMS` 校验通过。
   - 测试共 39 项（`eval/test_b1c_b2.py`），全部通过。
 
+- **补上了跑通全流程所缺的两块**（2026-11-25）：
+  - **`/rz-docs:poc` 扩展到第 1～6 步。** 第 4 步打上 `design-v1` 之后，依次引导：实现 → 构建 → 写板子 → 验证 → 打包 → `release-v1`，每一步的完成都按磁盘上的状态判定。新增 `poc-env`，用于在容器里运行 devtool。
+  - **新增 `evk-verify`。** 它执行 `design/verify.toml`（三种执行位置：Linux 命令、主机命令、重启计时），生成 `03-verification.md`。从板子输出里提取的值代入主机命令时，会先校验字符、再加引号。
+  - **测试**：流程测试共 43 项，覆盖各阶段的切换和关口，例如构建晚于最后一次提交才算数、写入的必须是这次构建的镜像、验证未通过时停下等用户决定。`evk-verify` 的测试共 9 项，用的是带 Linux 登录和 shell 的假板子。写板子的测试仍然是 21 项全部通过。
+
 默认的存放位置如下，需要时可以改：
 
 - 脚本和模板放在 rz-mcp 的 `workflow/` 下，由 MCP 以 prompts 和 resources 的形式提供；

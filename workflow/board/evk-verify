@@ -1,0 +1,158 @@
+#!/usr/bin/env python3
+"""Run a PoC's on-board verification plan and write the report (step 6).
+
+    workflow/board/evk-verify <poc> [--plan design/verify.toml] [--port /dev/rzg3l-evk-console]
+
+The plan is design/verify.toml, written from section 11 of design/01-design.md (template: workflow/templates/
+design/verify.toml). Each [[check]]:
+    id, title, requirement     e.g. "V-1", what is checked, which requirement item of 01-design section 1
+    where                      "linux" (shell on the board, serial console), "host" (shell on the host) or
+                               "boot" (reboot from Linux; times to U-Boot, 'Starting kernel' and the login prompt)
+    run                        the command (linux / host); ${name} is replaced by an earlier capture
+    expect                     regex the output must contain (linux / host)
+    expect_rc                  exit status that is required (default: not checked)
+    max_seconds                boot: the login prompt must come within this time
+    capture, capture_as        regex with one group, stored as ${capture_as} for later checks
+    timeout                    seconds (default 60)
+Pass/fail is decided by these fields only. Output: design/03-verification.md, design/verify-logs/<time>/
+(console.log, results.json). Exit status 0 only if every check passed.
+"""
+import argparse
+import datetime as dt
+import json
+import re
+import shlex
+import subprocess
+import sys
+import time
+import tomllib
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import evk  # noqa: E402
+
+WHERE = ("linux", "host", "boot")
+
+
+def load_plan(path: Path) -> list[dict]:
+    text = path.read_text()
+    if text.lstrip().startswith("# TEMPLATE"):
+        sys.exit(f"{path} is still the template: write the checks from section 11 of 01-design.md first")
+    checks = tomllib.loads(text).get("check", [])
+    if not checks:
+        sys.exit(f"{path}: no [[check]]")
+    seen = set()
+    for c in checks:
+        for k in ("id", "title", "where"):
+            if k not in c:
+                sys.exit(f"{path}: a check without '{k}': {c}")
+        if c["id"] in seen:
+            sys.exit(f"{path}: duplicate id {c['id']}")
+        seen.add(c["id"])
+        if c["where"] not in WHERE:
+            sys.exit(f"{path}: {c['id']}: where must be one of {WHERE}")
+        if c["where"] != "boot" and ("run" not in c or "expect" not in c):
+            sys.exit(f"{path}: {c['id']}: '{c['where']}' needs run and expect")
+        for k in ("expect", "capture"):
+            if k in c:
+                re.compile(c[k])
+    return checks
+
+
+SAFE_VALUE = re.compile(r"[A-Za-z0-9._:/@-]+")     # captured values come from the board: no shell syntax
+
+
+def subst(s: str, vars_: dict, quote: bool) -> str:
+    """Replace ${name}. Values were captured from board output, so for host commands they are shell-quoted."""
+    def rep(m):
+        if m.group(1) not in vars_:
+            raise KeyError(f"${{{m.group(1)}}} is not captured by an earlier check")
+        return shlex.quote(vars_[m.group(1)]) if quote else vars_[m.group(1)]
+    return re.sub(r"\$\{(\w+)\}", rep, s)
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("poc")
+    ap.add_argument("--plan", type=Path)
+    ap.add_argument("--port", default=evk.PORT)
+    ap.add_argument("--wait", type=float, default=600)
+    ap.add_argument("--project", type=Path, default=HERE.parent.parent.parent / "rzg3l-bsp-v1")
+    a = ap.parse_args()
+    poc = next((p.resolve() for p in (Path(a.poc), a.project / a.poc, a.project / f"rzg3l-{a.poc}") if p.is_dir()), None)
+    if poc is None:
+        sys.exit(f"no PoC repository {a.poc!r}")
+    plan = a.plan or poc / "design" / "verify.toml"
+    checks = load_plan(plan)
+    run_dir = poc / "design" / "verify-logs" / time.strftime("%Y%m%d-%H%M%S")
+    run_dir.mkdir(parents=True)
+    con = evk.Console(a.port, log=str(run_dir / "console.log"))
+    results, vars_ = [], {}
+    try:
+        if any(c["where"] in ("linux", "boot") for c in checks):
+            con.linux_shell(a.wait)
+        for c in checks:
+            r = {k: c.get(k) for k in ("id", "title", "requirement", "where")}
+            t = c.get("timeout", 60)
+            try:
+                if c["where"] == "boot":
+                    times = con.reboot_timed(t)
+                    con.login()
+                    r["observed"] = ", ".join(f"{k} {v} s" for k, v in times.items())
+                    r["expected"] = f"login ≤ {c['max_seconds']} s" if "max_seconds" in c else "reaches the login prompt"
+                    r["pass"] = "max_seconds" not in c or times["login"] <= c["max_seconds"]
+                    r["metrics"] = times
+                else:
+                    cmd = subst(c["run"], vars_, quote=c["where"] == "host")
+                    if c["where"] == "linux":
+                        rc, out = con.linux_cmd(cmd, t)
+                    else:
+                        p = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=t)
+                        rc, out = p.returncode, (p.stdout + p.stderr).strip()
+                    ok_rc = "expect_rc" not in c or rc == c["expect_rc"]
+                    r.update(command=cmd, rc=rc, output=out[-4000:], expected=f"/{c['expect']}/" +
+                             (f", rc {c['expect_rc']}" if "expect_rc" in c else ""),
+                             observed=(re.search(c["expect"], out).group(0) if re.search(c["expect"], out) else out[-200:]) +
+                             f" (rc {rc})")
+                    r["pass"] = bool(re.search(c["expect"], out)) and ok_rc
+                    if "capture" in c:
+                        m = re.search(c["capture"], out)
+                        if m and not SAFE_VALUE.fullmatch(m.group(1)):
+                            raise evk.BoardError(f"captured value {m.group(1)!r} has characters outside [A-Za-z0-9._:/@-]")
+                        if m:
+                            vars_[c.get("capture_as", c["id"])] = m.group(1)
+                            r["captured"] = {c.get("capture_as", c["id"]): m.group(1)}
+            except (TimeoutError, KeyError, subprocess.TimeoutExpired, evk.BoardError) as e:
+                r.update(observed=f"error: {e}", expected=c.get("expect", c.get("max_seconds", "")), **{"pass": False})
+            print(f"{'PASS' if r['pass'] else 'FAIL'} {r['id']} {r['title']}: {r['observed']}", flush=True)
+            results.append(r)
+    finally:
+        con.close()
+
+    passed = sum(r["pass"] for r in results)
+    text = (run_dir / "console.log").read_text(errors="replace")
+    versions = {k: (re.findall(rx, text) or [None])[-1] for k, rx in
+                (("u_boot", r"U-Boot 20\d\d\.\d\d[^\n]*"), ("bl2", r"BL2: v[^\n]*"))}
+    (run_dir / "results.json").write_text(json.dumps({"plan": str(plan), "results": results, "versions": versions},
+                                                     indent=1, ensure_ascii=False))
+    lines = [f"# 第 6 步：上板验证结果", "",
+             f"> 时间：{dt.datetime.now().isoformat(timespec='seconds')}；计划：`{plan.relative_to(poc)}`；"
+             f"日志：`{run_dir.relative_to(poc)}/`",
+             f"> 版本：U-Boot `{versions['u_boot']}`；BL2 `{versions['bl2']}`", "",
+             f"结果：{'全部通过' if passed == len(results) else f'{len(results) - passed} 项未通过'}（{passed}/{len(results)}）", "",
+             "| # | 验证项 | 需求项 | 在哪里 | 期望 | 观察到的 | 结果 |", "|---|---|---|---|---|---|---|"]
+    for r in results:
+        lines.append(f"| {r['id']} | {r['title']} | {r.get('requirement') or ''} | {r['where']} | {r['expected']} | "
+                     f"{str(r['observed']).replace('|', '/').replace(chr(10), ' ')[:160]} | {'PASS' if r['pass'] else '**FAIL**'} |")
+    lines += ["", "## 原始输出", ""]
+    for r in results:
+        if r.get("command"):
+            lines += [f"### {r['id']}", "", f"```text\n$ {r['command']}\n{r['output'][-1500:]}\n```", ""]
+    (poc / "design" / "03-verification.md").write_text("\n".join(lines) + "\n")
+    print(f"{passed}/{len(results)} passed; report: {poc / 'design' / '03-verification.md'}")
+    sys.exit(0 if passed == len(results) else 1)
+
+
+if __name__ == "__main__":
+    main()
