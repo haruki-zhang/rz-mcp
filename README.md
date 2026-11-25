@@ -86,3 +86,11 @@ journalctl --user -u rz-mcp -f            # 查看日志
 | `search_registers` | 按功能描述或字段名查找寄存器 |
 
 结构化寄存器目前覆盖 WDT、SCIFA、CPG，其他模块请用 `search_docs` 和 `get_section`。
+
+## Prompt：PoC 工作流
+
+| Prompt | 用途 |
+|---|---|
+| `/rz-docs:poc <名称>` | 推进 RZ/G3L PoC 工作流的第 1～4 步：设想 → v1、v2 → 两轨方案 → 融合 → 用户对齐。它读取 PoC 仓库在磁盘上的状态，告诉主会话下一步做什么 |
+
+工具、模板和子 Agent 的定义都在 [workflow/](workflow/README.md) 下。流程的定义见 `plan/PoC_Workflow_Plan.md`。

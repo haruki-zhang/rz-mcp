@@ -270,6 +270,19 @@ Tesera 是 RZ/G2L 客户板的 bring-up（`MACHINE=rzg2l-tlc-01`，VLP v4.0.2，
 | B2 第 5 步 | 构建与交付 | `poc-use`，用于切换配置；容器内构建；`RM_WORK_EXCLUDE`；`package`；洁净室复现 | 用 `poc-use lowpower-display` 重新生成的配置，和当前 build/conf 中的一致；用 `package` 打出的结构和 rzg3l-lowpower-display 一致 |
 | B3 第 6 步 | 上板 | 安装 TFTP 和 NFS；串口 harness；板子准备清单；`locate_log` | 第一个真实 PoC 上板时验证 |
 
+进度（2026-11-25）：
+
+- **B0 完成**：rz-mcp 已纳入本地 git 管理。不跟踪 `docs/`（872 MB 的原始资料）和 `data/`（生成的库、调用日志和 token）。
+- **B1a 完成**：包括 `workflow/`（`poc-new`、`install-agents`、模板、两个子 Agent），以及 MCP prompt `poc`（`src/rzmcp/workflow.py`）。
+  - 已验证：
+    - 31 项已知答案测试全部通过：`poc-new` 生成的目录结构、指南文件名、指南的 `##` 标题、`md2pdf.py`、`.gitignore` 都和 rzg3l-lowpower-display 一致；prompt 在每个阶段给出的下一步都正确；install-agents 正常工作；子 Agent 的 frontmatter 正确；
+    - 通过 HTTP 对运行中的服务做了端到端测试：prompt 能列出，参数只有 `name`；对已交付的 rzg3l-lowpower-display 会提示"停下，不要写入"；原有工具不受影响。
+  - 还没有验证：
+    - `/rz-docs:poc` 在 VS Code 面板里能否显示和使用；
+    - 在 rzg3l-bsp-v1 下的会话能否调起两个子 Agent。
+
+  这两项要在第一次实际使用时由用户确认。
+
 默认的存放位置如下，需要时可以改：
 
 - 脚本和模板放在 rz-mcp 的 `workflow/` 下，由 MCP 以 prompts 和 resources 的形式提供；

@@ -1,0 +1,42 @@
+#!/usr/bin/env python3
+"""Install the PoC workflow subagents (workflow/agents/*.md) into a Yocto project's .claude/agents/.
+
+    workflow/install-agents [--project DIR] [--check]
+
+--check    only compare; exit 1 if an installed definition is missing or differs from workflow/agents/.
+The source of truth is workflow/agents/ in rz-mcp (under git); the project copies are overwritten.
+"""
+import argparse
+import filecmp
+import os
+import shutil
+import sys
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+DEFAULT_PROJECT = Path(os.environ.get("RZ_POC_PROJECT", HERE.parent.parent / "rzg3l-bsp-v1"))
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--project", type=Path, default=DEFAULT_PROJECT)
+    ap.add_argument("--check", action="store_true")
+    a = ap.parse_args()
+    dst = a.project.resolve() / ".claude" / "agents"
+    stale = []
+    for src in sorted((HERE / "agents").glob("*.md")):
+        out = dst / src.name
+        if out.exists() and filecmp.cmp(src, out, shallow=False):
+            continue
+        stale.append(out)
+        if not a.check:
+            dst.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, out)
+    for p in stale:
+        print(("differs or missing: " if a.check else "installed: ") + str(p))
+    if a.check and stale:
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

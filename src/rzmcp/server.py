@@ -30,6 +30,7 @@ from pydantic import Field
 
 from . import DB_PATH, ROOT
 from . import query as Q
+from . import workflow as W
 
 LOG_PATH = ROOT / "data" / "calls.jsonl"
 
@@ -152,6 +153,14 @@ def build_server() -> MCPServer:
         """Find registers / bit fields by function or partial name within the structured modules (WDT, SCIFA,
         CPG). Returns candidate registers with offset and section; follow up with lookup_register."""
         return Q.search_registers(query=query, device=device, module=module, limit=limit)
+
+    @mcp.prompt(name="poc", title="RZ/G3L PoC workflow (steps 1-4)",
+                description="推进 RZ/G3L PoC 工作流的第 1～4 步：设想 → v1/v2 → 两轨方案 → 融合 → 用户对齐。"
+                            "参数：PoC 名称（一个词，例如 lowpower-display）。每完成一步再运行一次即可继续。")
+    @_logged
+    def poc(name: str) -> str:
+        """Steps 1-4 of the PoC workflow; reads the PoC repository state and returns the next step."""
+        return W.poc_prompt(name)
 
     return mcp
 
