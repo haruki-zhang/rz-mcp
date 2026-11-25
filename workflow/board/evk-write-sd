@@ -3,130 +3,24 @@
 
     workflow/board/evk-write-sd --image <x.wic.gz> [--bmap <x.wic.bmap>] [options]
 
-1. prepare (host, no board): read the bmap, decompress the image once, check every mapped range against
-   the bmap's sha256, and cut the mapped data into chunks with a CRC32 each, staged in <tftp-root>/evk/<id>/.
+1. prepare (host, no board): check every mapped range against the bmap sha256 and cut the mapped data into
+   CRC32'd chunks, staged in <tftp-root>/evk/<id>/.
 2. write (board): get to the U-Boot prompt (a person powers the board on), check that mmc <dev> is an SD
-   card large enough (never eMMC unless --allow-emmc), set static IPs, then per chunk:
-   tftpboot -> crc32 (must match) -> mmc write. Then read every chunk back and compare the CRC32 again.
+   card large enough (never eMMC unless --allow-emmc), set static IPs, then per chunk
+   tftpboot -> crc32 (must match) -> mmc write; then read every chunk back and compare the CRC32 again.
 3. boot check: a person sets SW_MODE to eSD and power-cycles; the tool waits for --expect on the console.
 
-Only the mapped ranges are written, exactly as bmaptool does. Board-side prerequisites: the board boots to
-U-Boot from its current media; the USB NIC is cabled to a Carrier II RJ45 jack. Host side: setup-host.sh.
+For eMMC boot, including BL2/FIP on a board without U-Boot, use evk-write-emmc.
 """
 import argparse
-import gzip
 import hashlib
-import json
-import os
 import sys
 import time
-import xml.etree.ElementTree as ET
-import zlib
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import evk  # noqa: E402
-
-SECTOR = 512
-
-
-def read_bmap(path: Path) -> dict:
-    raw = path.read_bytes()
-    # A bmap has no DTD; refusing DOCTYPE/ENTITY rules out XXE and entity expansion without defusedxml.
-    if b"<!DOCTYPE" in raw or b"<!ENTITY" in raw:
-        sys.exit(f"{path}: refusing a bmap with a DOCTYPE or ENTITY declaration")
-    r = ET.fromstring(raw)
-    if not r.get("version", "").startswith("2."):
-        sys.exit(f"{path}: unsupported bmap version {r.get('version')}")
-    bs = int(r.find("BlockSize").text)
-    ranges = []
-    for e in r.find("BlockMap"):
-        a, _, b = e.text.strip().partition("-")
-        ranges.append((int(a), int(b or a), e.get("chksum")))
-    return {"image_size": int(r.find("ImageSize").text), "block_size": bs, "ranges": ranges,
-            "checksum": r.find("ChecksumType").text.strip()}
-
-
-def prepare(image: Path, bmap_path: Path, stage: Path, chunk_bytes: int) -> dict:
-    bm = read_bmap(bmap_path)
-    if bm["checksum"] != "sha256":
-        sys.exit(f"unsupported checksum type {bm['checksum']}")
-    man_path = stage / "manifest.json"
-    if man_path.exists():
-        man = json.loads(man_path.read_text())
-        if all((stage / c["file"]).exists() for c in man["chunks"]):
-            print(f"prepare: reusing {stage} ({len(man['chunks'])} chunks)")
-            return man
-    stage.mkdir(parents=True, exist_ok=True)
-    bs, size = bm["block_size"], bm["image_size"]
-    chunks, pos, t0 = [], 0, time.time()
-    with gzip.open(image, "rb") as f:
-        for first, last, chksum in bm["ranges"]:
-            start, end = first * bs, min((last + 1) * bs, size)
-            f.read(start - pos)                       # skip unmapped data (sequential gzip stream)
-            data = f.read(end - start)
-            pos = end
-            if len(data) != end - start or hashlib.sha256(data).hexdigest() != chksum:
-                sys.exit(f"image does not match the bmap at blocks {first}-{last}: wrong or damaged image")
-            for off in range(0, len(data), chunk_bytes):
-                piece = data[off:off + chunk_bytes]
-                piece += b"\0" * (-len(piece) % SECTOR)   # only the image's last sector can be partial
-                name = f"c{len(chunks):03d}.bin"
-                (stage / name).write_bytes(piece)
-                chunks.append({"file": name, "sector": (start + off) // SECTOR, "sectors": len(piece) // SECTOR,
-                               "bytes": len(piece), "crc32": zlib.crc32(piece) & 0xFFFFFFFF})
-    man = {"image": str(image), "bmap": str(bmap_path), "image_size": size, "chunks": chunks,
-           "mapped_bytes": sum(c["bytes"] for c in chunks)}
-    man_path.write_text(json.dumps(man, indent=1))
-    print(f"prepare: {len(chunks)} chunks, {man['mapped_bytes'] / 2**20:.0f} MiB mapped of "
-          f"{size / 2**20:.0f} MiB, sha256 of all {len(bm['ranges'])} bmap ranges OK ({time.time() - t0:.0f}s)")
-    return man
-
-
-def write(con: "evk.Console", man: dict, rel: str, stage: Path, dev: int, allow_emmc: bool, verify: bool) -> None:
-    card = con.mmc_select(dev)
-    print(f"mmc {dev}: {card['type']}, {card['capacity'] / 2**30:.1f} GiB")
-    if card["type"] != "SD" and not allow_emmc:
-        raise evk.BoardError(f"mmc {dev} is {card['type']}, not an SD card; refusing (模块 SYS[1] 应为 ON = microSD)")
-    if card["capacity"] < man["image_size"]:
-        raise evk.BoardError(f"card too small: {card['capacity']} < image {man['image_size']} bytes")
-    print("network:", con.net_setup())
-    t0, done = time.time(), 0
-    for i, c in enumerate(man["chunks"]):
-        for attempt in range(3):
-            try:
-                con.tftp(evk.LOADADDR, f"{rel}/{c['file']}", c["bytes"])
-                got = con.crc32(evk.LOADADDR, c["bytes"])
-                if got != c["crc32"]:
-                    raise evk.BoardError(f"{c['file']}: crc32 {got:08x} != {c['crc32']:08x} after tftp")
-                break
-            except (evk.BoardError, TimeoutError) as e:
-                print(f"  {c['file']}: attempt {attempt + 1} failed: {e}")
-                if attempt == 2:
-                    raise
-        con.mmc_rw("write", evk.LOADADDR, c["sector"], c["sectors"])
-        done += c["bytes"]
-        rate = done / max(time.time() - t0, 1e-3)
-        print(f"  [{i + 1}/{len(man['chunks'])}] {c['file']} -> sector {c['sector']:#x}  "
-              f"{done / 2**20:.0f}/{man['mapped_bytes'] / 2**20:.0f} MiB  {rate / 2**20:.1f} MiB/s", flush=True)
-    print(f"write: done in {time.time() - t0:.0f}s")
-    if verify:
-        t1 = time.time()
-        for c in man["chunks"]:
-            con.mmc_rw("read", evk.LOADADDR, c["sector"], c["sectors"])
-            got = con.crc32(evk.LOADADDR, c["bytes"])
-            if got != c["crc32"]:
-                raise evk.BoardError(f"read-back of {c['file']} (sector {c['sector']:#x}): crc32 {got:08x} != {c['crc32']:08x}")
-        print(f"verify: all {len(man['chunks'])} chunks read back with matching CRC32 ({time.time() - t1:.0f}s)")
-
-
-def boot_check(con: "evk.Console", expect: str, wait: float) -> None:
-    evk.human("把 SW_MODE 设成 eSD 启动（SW_MODE[1:3] = ON ON OFF，模块 SYS[1] = ON），然后断电再上电。")
-    con.buf = ""
-    t0 = time.time()
-    con.expect([expect], wait)
-    print(f"boot check: '{expect}' seen {time.time() - t0:.0f}s after the prompt above")
 
 
 def main() -> None:
@@ -152,8 +46,7 @@ def main() -> None:
         sys.exit("need a .wic.gz image with its .wic.bmap")
     image_id = f"{image.name.removesuffix('.wic.gz')}-{hashlib.sha256(bmap_path.read_bytes()).hexdigest()[:8]}"
     rel = f"evk/{image_id}"
-    stage = a.tftp_root / rel
-    man = prepare(image, bmap_path, stage, a.chunk_mb << 20)
+    man = evk.stage_image(image, bmap_path, a.tftp_root / rel, a.chunk_mb << 20)
     if a.prepare_only:
         return
 
@@ -163,9 +56,20 @@ def main() -> None:
     con = evk.Console(a.port, log=str(log))
     try:
         con.stop_autoboot(a.wait)
-        write(con, man, rel, stage, a.mmc, a.allow_emmc, not a.no_verify)
+        card = con.mmc_select(a.mmc)
+        print(f"mmc {a.mmc}: {card['type']}, {card['capacity'] / 2**30:.1f} GiB")
+        if card["type"] != "SD" and not a.allow_emmc:
+            raise evk.BoardError(f"mmc {a.mmc} is {card['type']}, not an SD card; refusing (模块 SYS[1] 应为 ON = microSD)")
+        if card["capacity"] < man["image_size"]:
+            raise evk.BoardError(f"card too small: {card['capacity']} < image {man['image_size']} bytes")
+        print("network:", con.net_setup())
+        con.write_chunks(man, rel, not a.no_verify)
         if not a.no_boot_check:
-            boot_check(con, a.expect, a.wait)
+            evk.human("把 SW_MODE 设成 eSD 启动（SW_MODE[1:3] = ON ON OFF，模块 SYS[1] = ON），然后断电再上电。")
+            con.buf = ""
+            t0 = time.time()
+            con.expect([a.expect], a.wait)
+            print(f"boot check: '{a.expect}' seen {time.time() - t0:.0f}s after the prompt above")
     finally:
         con.close()
     print("OK")

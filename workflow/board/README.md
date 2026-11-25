@@ -7,6 +7,7 @@
 | `setup-host.sh` | 主机配置，**用 sudo 运行一次**：串口的 udev 规则，USB 网卡的固定 IP，dnsmasq（只在 USB 网卡上提供 DHCP 和 TFTP），`/srv/tftp`。加 `--undo` 可以撤销 |
 | `evk.py` | 串口控制台（带日志）和 U-Boot 操作。输出格式按 BSP 所用 rev 的 U-Boot 源码核对过 |
 | `evk-write-sd` | 写 microSD：准备分块 → 进入 U-Boot → 逐块 TFTP、CRC32、`mmc write` → 读回校验 → 启动确认 |
+| `evk-write-emmc` | **eMMC 启动**，适用于还没有 U-Boot 的板子：先用 Flash Writer 把 BL2、FIP、CM33 固件写进 eMMC boot 分区 1，并设置 EXT_CSD；再从 eMMC 启动 U-Boot，把 rootfs 写进 user 区；最后 `saveenv` 并重启，确认启动成功 |
 
 ## 一次性准备（主机）
 
@@ -21,7 +22,21 @@ sudo bash workflow/board/setup-host.sh
 3. 模块上的 SYS[1] 打到 ON，选择 microSD0。工具只写 SD 卡，检测到 eMMC 会拒绝写入。
 4. SW_MODE 设成板子上**现有**镜像能启动到 U-Boot 的模式。例如 microSD 里已有可启动的镜像时，用 eSD 模式：SW_MODE[1:3] = ON ON OFF。
 
-## 写入
+## eMMC 启动（板子上没有 U-Boot 也可以）
+
+```sh
+workflow/board/evk-write-emmc --image <deploy>/<x>.wic.gz    # 启动文件从同一个 deploy 目录读取
+```
+
+| 阶段 | 人做什么 | 工具做什么 |
+|---|---|---|
+| 1 | SW_MODE[1:3] = OFF ON OFF（SCIF 下载模式），模块 SYS[1] = OFF（eMMC），上电 | 以 115200 发送 Flash Writer，`SUP` 切到 921600；`EM_W` 写入：bl2_bp_mmc → 分区 1 sector 0x1（加载地址 0x21e00），fip → 0x300（0x0），lpdemo-cm33-fw → 0x1380（0x0）；`em_secsd` 设 B1=0x02、B3=0x08 |
+| 2 | SW_MODE[1:3] = ON OFF OFF（eMMC），Carrier 上的 microSD1 槽不插卡，断电后重新上电 | U-Boot 进入 `mmc dev 0 0`（必须是 eMMC），通过 TFTP 写入 user 区，读回校验，`env default -a; saveenv`，执行 `reset`，等待 `login:` |
+
+地址的出处：Start-up Guide R01US0858EJ0100 §8.2.1 表 13 和表 14；CM33 固件的地址来自 LowPower 指南 §4.1，该节注明为 "Not Verified"。
+碰板子之前，工具先做以下检查：每个 .srec 解码后要和同一次构建的 .bin 一致，起始地址要等于加载地址，并且不能和下一个文件重叠。
+
+## 写入（microSD）
 
 ```sh
 workflow/board/evk-write-sd --image <x.wic.gz>      # 同一目录下要有 x.wic.bmap

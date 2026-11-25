@@ -308,7 +308,9 @@ Tesera 是 RZ/G2L 客户板的 bring-up（`MACHINE=rzg2l-tlc-01`，VLP v4.0.2，
 **进度（2026-11-25）**：B3 中"写 microSD"这一部分已经做好（`workflow/board/`）。
 - 方式：板子进入 U-Boot 后，按 bmap 分块用 TFTP 下载，每块先校验 CRC32，再 `mmc write`，最后全部读回校验。只写有数据的区段，和 bmaptool 一样。
 - 离线测试 12 项全部通过（`eval/test_board.py`，对着假 U-Boot 运行）。其中，今天构建的 lpdemo 镜像（562 MB 有效数据）写入后，13 个区段的 sha256 都和 bmap 一致。
-- 还没在实机上运行：需要用户先执行 `setup-host.sh`，并接好板子。
+- **eMMC 启动**（`evk-write-emmc`）：板子上还没有 U-Boot 时，先进入 SCIF 下载模式，用 Flash Writer 写入 BL2、FIP、CM33 固件，并设置 EXT_CSD；然后从 eMMC 启动 U-Boot，用 TFTP 写入 user 区，最后 `saveenv` 并 `reset`。离线测试增加到 20 项，全部通过。用真实的 lpdemo 镜像测试时，boot 分区 1 上的内容和构建出的 .bin 一致，user 区和 bmap 一致。
+- 不需要恢复 Linux 网口：写入用的是 U-Boot 的网络。fast-boot 层只在 Linux 侧（内核配置、设备树、systemd）关掉了网口，没有动 U-Boot 的网络；启动确认用的是串口上的 `login:`（getty 在 ttySC3 上）。
+- 还没在实机上运行：需要用户先执行 `setup-host.sh`，并接好板子。首次实机运行时要确认三件事：U-Boot 的网口能否工作（Start-up Guide 里旧版 U-Boot 显示 "No ethernet found"）；Flash Writer 实际打印的文字是否和 rc1 版指南一致；CM33 固件写在 0x1380 能否正常启动（LowPower 指南注明为 Not Verified）。
 
 **方案**（B3 时实施）
 

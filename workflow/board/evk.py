@@ -1,21 +1,31 @@
-"""RZ/G3L SMARC EVK console harness: serial console with logging, and U-Boot helpers.
+"""RZ/G3L SMARC EVK board harness: serial console with logging, Flash Writer and U-Boot helpers, image staging.
 
-Output formats are matched against U-Boot at the BSP revision (renesas-u-boot-cip 16e6324c):
-  common/autoboot.c "Hit any key to stop autoboot", cmd/net.c "host %s is alive",
-  net/net.c "Bytes transferred = %u (%x hex)", common/hash.c "CRC32 for ... ==> %08lx",
+Output formats are matched against the sources the BSP uses:
+  U-Boot (renesas-u-boot-cip 16e6324c): common/autoboot.c "Hit any key to stop autoboot", cmd/net.c
+  "host %s is alive", net/net.c "Bytes transferred = %u (%x hex)", common/hash.c "CRC32 for ... ==> %08lx",
   cmd/mmc.c "%d blocks written: OK" / "SD version" vs "MMC version".
+  BootROM and Flash Writer: Linux Start-up Guide R01US0858EJ0100 Rev.1.00-rc1, sections 4.3, 4.4 and 8.2
+  ("please send !", "Flash writer for RZ/G3L", SUP, EM_W, em_secsd).
 Needs pyserial (system python3 has it).
 """
+import gzip
+import hashlib
+import json
 import re
 import sys
 import time
+import xml.etree.ElementTree as ET
+import zlib
+from pathlib import Path
 
 import serial
 
 PROMPT = "=> "
+FW_PROMPT = r"\n>[>\s]*$"             # Flash Writer prompt; a trailing CR LF of a sent file can add a second ">"
 PORT = "/dev/rzg3l-evk-console"       # udev symlink from setup-host.sh
-LOADADDR = 0x58000000                  # CONFIG_SYS_LOAD_ADDR of smarc-rzg3l_defconfig; DDR is 2 GB from 0x40000000
+LOADADDR = 0x58000000                  # CONFIG_SYS_LOAD_ADDR; U-Boot reports 896 MiB of DRAM from 0x40000000
 HOST_IP, BOARD_IP, NETMASK = "192.168.50.1", "192.168.50.2", "255.255.255.0"
+SECTOR = 512
 
 
 def human(msg: str) -> None:
@@ -26,6 +36,88 @@ def human(msg: str) -> None:
 class BoardError(RuntimeError):
     pass
 
+
+# ---------------------------------------------------------------- files on the host
+
+def read_bmap(path: Path) -> dict:
+    raw = path.read_bytes()
+    # A bmap has no DTD; refusing DOCTYPE/ENTITY rules out XXE and entity expansion without defusedxml.
+    if b"<!DOCTYPE" in raw or b"<!ENTITY" in raw:
+        sys.exit(f"{path}: refusing a bmap with a DOCTYPE or ENTITY declaration")
+    r = ET.fromstring(raw)
+    if not r.get("version", "").startswith("2."):
+        sys.exit(f"{path}: unsupported bmap version {r.get('version')}")
+    ranges = []
+    for e in r.find("BlockMap"):
+        a, _, b = e.text.strip().partition("-")
+        ranges.append((int(a), int(b or a), e.get("chksum")))
+    return {"image_size": int(r.find("ImageSize").text), "block_size": int(r.find("BlockSize").text),
+            "ranges": ranges, "checksum": r.find("ChecksumType").text.strip()}
+
+
+def srec_decode(path: Path) -> tuple[int, bytes]:
+    """Decode a Motorola S-record file (S1/S2/S3 data). Returns (lowest address, contiguous data); checksums checked."""
+    recs = []
+    for n, line in enumerate(path.read_text(encoding="ascii").splitlines(), 1):
+        line = line.strip()
+        if not line:
+            continue
+        if line[0] != "S" or line[1] not in "0123456789":
+            raise ValueError(f"{path}:{n}: not an S-record")
+        raw = bytes.fromhex(line[2:])
+        if raw[0] != len(raw) - 1 or (sum(raw) & 0xFF) != 0xFF:
+            raise ValueError(f"{path}:{n}: bad length or checksum")
+        alen = {"1": 2, "2": 3, "3": 4}.get(line[1])
+        if alen:
+            recs.append((int.from_bytes(raw[1:1 + alen], "big"), raw[1 + alen:-1]))
+    if not recs:
+        raise ValueError(f"{path}: no data records")
+    lo = min(a for a, _ in recs)
+    hi = max(a + len(d) for a, d in recs)
+    buf = bytearray(b"\xff" * (hi - lo))
+    for a, d in recs:
+        buf[a - lo:a - lo + len(d)] = d
+    return lo, bytes(buf)
+
+
+def stage_image(image: Path, bmap_path: Path, stage: Path, chunk_bytes: int) -> dict:
+    """Check every mapped range of the image against the bmap sha256 and cut the mapped data into CRC32'd chunks."""
+    bm = read_bmap(bmap_path)
+    if bm["checksum"] != "sha256":
+        sys.exit(f"unsupported checksum type {bm['checksum']}")
+    man_path = stage / "manifest.json"
+    if man_path.exists():
+        man = json.loads(man_path.read_text())
+        if all((stage / c["file"]).exists() for c in man["chunks"]):
+            print(f"prepare: reusing {stage} ({len(man['chunks'])} chunks)")
+            return man
+    stage.mkdir(parents=True, exist_ok=True)
+    bs, size = bm["block_size"], bm["image_size"]
+    chunks, pos, t0 = [], 0, time.time()
+    with gzip.open(image, "rb") as f:
+        for first, last, chksum in bm["ranges"]:
+            start, end = first * bs, min((last + 1) * bs, size)
+            f.read(start - pos)                       # skip unmapped data (sequential gzip stream)
+            data = f.read(end - start)
+            pos = end
+            if len(data) != end - start or hashlib.sha256(data).hexdigest() != chksum:
+                sys.exit(f"image does not match the bmap at blocks {first}-{last}: wrong or damaged image")
+            for off in range(0, len(data), chunk_bytes):
+                piece = data[off:off + chunk_bytes]
+                piece += b"\0" * (-len(piece) % SECTOR)   # only the image's last sector can be partial
+                name = f"c{len(chunks):03d}.bin"
+                (stage / name).write_bytes(piece)
+                chunks.append({"file": name, "sector": (start + off) // SECTOR, "sectors": len(piece) // SECTOR,
+                               "bytes": len(piece), "crc32": zlib.crc32(piece) & 0xFFFFFFFF})
+    man = {"image": str(image), "bmap": str(bmap_path), "image_size": size, "chunks": chunks,
+           "mapped_bytes": sum(c["bytes"] for c in chunks)}
+    man_path.write_text(json.dumps(man, indent=1))
+    print(f"prepare: {len(chunks)} chunks, {man['mapped_bytes'] / 2**20:.0f} MiB mapped of "
+          f"{size / 2**20:.0f} MiB, sha256 of all {len(bm['ranges'])} bmap ranges OK ({time.time() - t0:.0f}s)")
+    return man
+
+
+# ---------------------------------------------------------------- console
 
 class Console:
     def __init__(self, port: str = PORT, baud: int = 115200, log: str | None = None, echo: bool = False):
@@ -38,6 +130,9 @@ class Console:
         self.ser.close()
         if self.log:
             self.log.close()
+
+    def baud(self, rate: int) -> None:
+        self.ser.baudrate = rate
 
     def _pump(self) -> bool:
         data = self.ser.read(65536)
@@ -53,8 +148,15 @@ class Console:
             sys.stdout.flush()
         return True
 
-    def send(self, s: str) -> None:
-        self.ser.write(s.encode())
+    def send(self, s: str | bytes) -> None:
+        self.ser.write(s.encode() if isinstance(s, str) else s)
+
+    def send_file(self, path: Path) -> None:
+        """Send a file (S-records) the way terminal software does, while keeping the log of what the board prints."""
+        data = path.read_bytes()
+        for off in range(0, len(data), 4096):
+            self.ser.write(data[off:off + 4096])
+            self._pump()
 
     def expect(self, patterns: list[str], timeout: float) -> tuple[int, str]:
         """Wait until one regex matches the buffered output; consume up to the match and return (index, text)."""
@@ -69,6 +171,46 @@ class Console:
                 raise TimeoutError(f"no {patterns!r} within {timeout:.0f}s; last output: {self.buf[-300:]!r}")
             self._pump()
 
+    # ---- BootROM SCIF download mode and Flash Writer ----
+    def scif_download(self, mot: Path, wait: float) -> str:
+        """BootROM in SCIF download mode -> send Flash Writer -> its prompt. Returns the Flash Writer banner line."""
+        self.buf = ""
+        self.expect([r"please send !"], wait)
+        print(f"BootROM: SCIF download mode; sending {mot.name} at 115200 bps ...", flush=True)
+        self.send_file(mot)
+        _, text = self.expect([r"Flash writer for RZ/G3L[^\n]*"], 120)
+        banner = re.search(r"Flash writer for RZ/G3L[^\n]*", text).group(0).strip()
+        self.expect([FW_PROMPT], 10)
+        return banner
+
+    def fw_cmd(self, line: str, expect: str, timeout: float = 10) -> str:
+        self.buf = ""
+        self.send(line + "\r")
+        return self.expect([expect], timeout)[1]
+
+    def fw_speed_up(self) -> None:
+        self.fw_cmd("SUP", r"Please change to 921\.6Kbps")
+        time.sleep(0.2)
+        self.baud(921600)
+        self.fw_cmd("", FW_PROMPT)
+
+    def fw_em_w(self, area: int, sector: int, prog_start: int, srec: Path) -> None:
+        self.fw_cmd("EM_W", r"Select area\(0-2\)>")
+        self.fw_cmd(str(area), r"Please Input Start Address in sector :")
+        self.fw_cmd(f"{sector:x}", r"Please Input Program Start Address :")
+        self.fw_cmd(f"{prog_start:x}", r"please send !", 30)
+        self.buf = ""
+        self.send_file(srec)
+        self.expect([r"EM_W Complete!"], 300)
+        self.expect([FW_PROMPT], 10)
+
+    def fw_em_secsd(self, index: int, value: int) -> None:
+        self.fw_cmd("em_secsd", r"Please Input EXT_CSD Index")
+        self.fw_cmd(f"{index:x}", r"Please Input Value")
+        out = self.fw_cmd(f"{value:x}", FW_PROMPT)
+        if not re.search(rf"EXT_CSD\[{index:X}\] = 0x{value:02X}", out, re.I):
+            raise BoardError(f"EXT_CSD[{index:#x}] not set to {value:#04x}: {out!r}")
+
     # ---- U-Boot ----
     def at_prompt(self, wait: float = 1.0) -> bool:
         self.buf = ""
@@ -79,12 +221,12 @@ class Console:
         except TimeoutError:
             return False
 
-    def stop_autoboot(self, wait: float) -> None:
+    def stop_autoboot(self, wait: float, msg: str = "给 EVK 上电，或者按一下复位键。工具会自动打断 U-Boot 的自动启动。") -> None:
         """Get to the U-Boot prompt. If the board is not already there, a person powers it on or resets it;
         from the first boot output on, keep pressing a key until the prompt appears (also works with bootdelay=0)."""
         if self.at_prompt():
             return
-        human("给 EVK 上电，或者按一下复位键。工具会自动打断 U-Boot 的自动启动。")
+        human(msg)
         deadline = time.time() + wait
         seen = bool(self.buf.strip())     # output already arrived during at_prompt(): the board is booting now
         while time.time() < deadline:
@@ -99,7 +241,7 @@ class Console:
             else:
                 time.sleep(0.05)
         raise TimeoutError("没有等到 U-Boot 提示符。确认串口线（Carrier II 的 micro-USB 'UART Debug' 口）、"
-                           "电源，以及 SW_MODE 设成了板子上现有镜像能启动的模式")
+                           "电源，以及 SW_MODE 设成了能启动到 U-Boot 的模式")
 
     def cmd(self, line: str, timeout: float = 10) -> str:
         """Run one U-Boot command; return its output (without the echoed command line and the prompt)."""
@@ -109,13 +251,13 @@ class Console:
         out = text.split("\n", 1)[1] if "\n" in text else ""
         return out[: -len(PROMPT)].rstrip("\n") if out.endswith(PROMPT) else out
 
-    def mmc_select(self, dev: int) -> dict:
-        out = self.cmd(f"mmc dev {dev}")
+    def mmc_select(self, dev: int, part: int | None = None) -> dict:
+        out = self.cmd(f"mmc dev {dev}" + ("" if part is None else f" {part}"))
         if "is current device" not in out:
             raise BoardError(f"mmc dev {dev} failed: {out!r}")
         info = self.cmd("mmc info")
         m = re.search(r"^(SD|MMC) version", info, re.M)
-        cap = re.search(r"^Capacity: ([\d.]+) ([KMGT])iB", info, re.M)
+        cap = re.search(r"^(?:User )?Capacity: ([\d.]+) ([KMGT])iB", info, re.M)
         if not m or not cap:
             raise BoardError(f"cannot read mmc info: {info!r}")
         size = float(cap.group(1)) * 1024 ** " KMGT".index(cap.group(2))
@@ -132,7 +274,7 @@ class Console:
                 dev = re.search(r"Using (\S+) device", out)
                 return f"{eth} ({dev.group(1) if dev else '?'})"
         raise BoardError("ping 主机失败：确认 USB 网卡接在 Carrier II 的 RJ45 口上，并且主机端 evk-direct 已经连上"
-                         "（nmcli con show evk-direct）")
+                         "（nmcli con show evk-direct）。若 U-Boot 打印 'No ethernet found'，则这个 U-Boot 没有可用网口")
 
     def tftp(self, addr: int, path: str, size: int) -> None:
         out = self.cmd(f"tftpboot {addr:#x} {path}", timeout=max(60, size / 2e5))
@@ -153,3 +295,34 @@ class Console:
         m = re.search(rf"(\d+) blocks {word}: (OK|ERROR)", out)
         if not m or m.group(2) != "OK" or int(m.group(1)) != cnt:
             raise BoardError(f"mmc {op} block {blk:#x} count {cnt:#x}: {out!r}")
+
+    def write_chunks(self, man: dict, rel: str, verify: bool = True) -> None:
+        """Per chunk: tftpboot -> crc32 must match -> mmc write (to the current mmc device); then read-back verify."""
+        t0, done = time.time(), 0
+        for i, c in enumerate(man["chunks"]):
+            for attempt in range(3):
+                try:
+                    self.tftp(LOADADDR, f"{rel}/{c['file']}", c["bytes"])
+                    got = self.crc32(LOADADDR, c["bytes"])
+                    if got != c["crc32"]:
+                        raise BoardError(f"{c['file']}: crc32 {got:08x} != {c['crc32']:08x} after tftp")
+                    break
+                except (BoardError, TimeoutError) as e:
+                    print(f"  {c['file']}: attempt {attempt + 1} failed: {e}")
+                    if attempt == 2:
+                        raise
+            self.mmc_rw("write", LOADADDR, c["sector"], c["sectors"])
+            done += c["bytes"]
+            rate = done / max(time.time() - t0, 1e-3)
+            print(f"  [{i + 1}/{len(man['chunks'])}] {c['file']} -> sector {c['sector']:#x}  "
+                  f"{done / 2**20:.0f}/{man['mapped_bytes'] / 2**20:.0f} MiB  {rate / 2**20:.1f} MiB/s", flush=True)
+        print(f"write: done in {time.time() - t0:.0f}s")
+        if verify:
+            t1 = time.time()
+            for c in man["chunks"]:
+                self.mmc_rw("read", LOADADDR, c["sector"], c["sectors"])
+                got = self.crc32(LOADADDR, c["bytes"])
+                if got != c["crc32"]:
+                    raise BoardError(f"read-back of {c['file']} (sector {c['sector']:#x}): "
+                                     f"crc32 {got:08x} != {c['crc32']:08x}")
+            print(f"verify: all {len(man['chunks'])} chunks read back with matching CRC32 ({time.time() - t1:.0f}s)")

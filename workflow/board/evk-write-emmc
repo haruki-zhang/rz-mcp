@@ -1,0 +1,135 @@
+#!/usr/bin/env python3
+"""Set up eMMC boot on the RZ/G3L SMARC EVK: BL2, FIP (and the CM33 firmware) to eMMC boot partition 1 with
+Flash Writer, then the WIC image to the eMMC user area from U-Boot over TFTP. Works on a board without U-Boot.
+
+    workflow/board/evk-write-emmc --image <deploy>/<x>.wic.gz [options]
+
+Phase 1  SCIF download mode (a person sets SW_MODE[1:3] = OFF ON OFF, SYS[1] = OFF, powers on):
+         Flash Writer at 115200 -> SUP 921600 -> EM_W bl2 / fip / cm33 -> em_secsd B1=0x02, B3=0x08.
+Phase 2  eMMC boot (a person sets SW_MODE[1:3] = ON OFF OFF, powers on again):
+         U-Boot from eMMC -> mmc dev 0 0 (must be eMMC) -> per chunk tftpboot / crc32 / mmc write ->
+         read-back verify -> env default -a; saveenv -> reset -> wait for --expect (default 'login:').
+
+Addresses: Linux Start-up Guide R01US0858EJ0100 Rev.1.00-rc1 section 8.2.1 Tables 13/14 (EXT_CSD, bl2, fip; the
+guide names the file bl2_bp_emmc, the build produces bl2_bp_mmc) and the LowPower Display guide section 4.1
+(lpdemo-cm33-fw at sector 0x1380). Before the board is touched, every S-record is decoded and must equal the
+.bin of the same build, start at its program start address, and fit before the next file.
+"""
+import argparse
+import hashlib
+import sys
+import time
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import evk  # noqa: E402
+
+MOT = "Flash_Writer_SCIF_RZG3L_SMARC_LPDDR4.mot"
+BOOT_FILES = [  # (srec, partition, start sector, program start address)
+    ("bl2_bp_mmc-smarc-rzg3l.srec", 1, 0x1, 0x21E00),
+    ("fip-smarc-rzg3l.srec", 1, 0x300, 0x0),
+]
+CM33 = ("lpdemo-cm33-fw-smarc-rzg3l.srec", 1, 0x1380, 0x0)
+EXT_CSD = [(0xB1, 0x02), (0xB3, 0x08)]
+BOOT_PART_SECTORS = 0xFC00            # 32256 KiB, as Flash Writer reports for the EVK eMMC
+
+
+def check_boot_files(deploy: Path, files: list[tuple]) -> None:
+    files = sorted(files, key=lambda f: f[2])
+    for i, (srec, part, sector, prog) in enumerate(files):
+        p = deploy / srec
+        lo, data = evk.srec_decode(p)
+        binf = p.with_suffix(".bin")
+        if lo != prog:
+            sys.exit(f"{srec}: data starts at {lo:#x}, not at the program start address {prog:#x}")
+        if binf.exists() and binf.read_bytes() != data:
+            sys.exit(f"{srec} does not match {binf.name}: files from different builds?")
+        limit = files[i + 1][2] if i + 1 < len(files) else BOOT_PART_SECTORS
+        if sector * evk.SECTOR + len(data) > limit * evk.SECTOR:
+            sys.exit(f"{srec} ({len(data)} bytes at sector {sector:#x}) overlaps sector {limit:#x}")
+        print(f"check: {srec}: {len(data)} bytes, partition {part} sector {sector:#x}..{(sector * 512 + len(data)) // 512:#x}"
+              f", load {prog:#x}, equals {binf.name if binf.exists() else '(no .bin)'}")
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--image", type=Path, required=True, help="<x>.wic.gz in the deploy directory, with <x>.wic.bmap")
+    ap.add_argument("--deploy", type=Path, help="directory with the Flash Writer and boot files (default: the image's)")
+    ap.add_argument("--cm33", choices=["auto", "yes", "no"], default="auto",
+                    help=f"also write {CM33[0]} (auto: if it is in the deploy directory)")
+    ap.add_argument("--skip-bootloader", action="store_true", help="phase 1 is already done; start in U-Boot")
+    ap.add_argument("--port", default=evk.PORT)
+    ap.add_argument("--chunk-mb", type=int, default=64)
+    ap.add_argument("--tftp-root", type=Path, default=Path("/srv/tftp"))
+    ap.add_argument("--log-dir", type=Path, default=HERE.parent.parent / "data" / "board-runs")
+    ap.add_argument("--prepare-only", action="store_true", help="only check the files and stage the chunks")
+    ap.add_argument("--no-saveenv", action="store_true")
+    ap.add_argument("--expect", default=r"login:", help="regex that marks a successful boot (default: 'login:')")
+    ap.add_argument("--wait", type=float, default=600, help="seconds to wait for each manual step")
+    a = ap.parse_args()
+
+    image = a.image.resolve()
+    bmap_path = Path(str(image).replace(".wic.gz", ".wic.bmap"))
+    if not image.name.endswith(".wic.gz") or not bmap_path.exists():
+        sys.exit("need a .wic.gz image with its .wic.bmap")
+    deploy = (a.deploy or image.parent).resolve()
+    files = list(BOOT_FILES)
+    if a.cm33 == "yes" or (a.cm33 == "auto" and (deploy / CM33[0]).exists()):
+        files.append(CM33)
+    for f in [MOT] + [f[0] for f in files]:
+        if not (deploy / f).exists():
+            sys.exit(f"missing {deploy / f}")
+    check_boot_files(deploy, files)
+    image_id = f"{image.name.removesuffix('.wic.gz')}-{hashlib.sha256(bmap_path.read_bytes()).hexdigest()[:8]}"
+    rel = f"evk/{image_id}"
+    man = evk.stage_image(image, bmap_path, a.tftp_root / rel, a.chunk_mb << 20)
+    if a.prepare_only:
+        return
+
+    a.log_dir.mkdir(parents=True, exist_ok=True)
+    log = a.log_dir / f"{time.strftime('%Y%m%d-%H%M%S')}-write-emmc.log"
+    print(f"console log: {log}")
+    con = evk.Console(a.port, log=str(log))
+    try:
+        if not a.skip_bootloader:
+            evk.human("设成 SCIF 下载模式：SW_MODE[1:3] = OFF ON OFF；模块 SYS[1] = OFF（eMMC）。然后上电，或者按复位键。")
+            print("flash writer:", con.scif_download(deploy / MOT, a.wait))
+            con.fw_speed_up()
+            print("flash writer: 921600 bps")
+            for srec, part, sector, prog in files:
+                t0 = time.time()
+                con.fw_em_w(part, sector, prog, deploy / srec)
+                print(f"EM_W {srec} -> partition {part} sector {sector:#x} (load {prog:#x}) OK ({time.time() - t0:.0f}s)")
+            for idx, val in EXT_CSD:
+                con.fw_em_secsd(idx, val)
+                print(f"EXT_CSD[{idx:#X}] = {val:#04x} OK")
+            con.baud(115200)
+        con.stop_autoboot(a.wait, "设成 eMMC 启动：SW_MODE[1:3] = ON OFF OFF；SYS[1] 保持 OFF；Carrier 上的 microSD1 槽"
+                                  "不要插卡（否则 U-Boot 会优先从那里启动）。然后断电再上电。")
+        card = con.mmc_select(0, 0)
+        print(f"mmc 0 (user area): {card['type']}, {card['capacity'] / 2**30:.1f} GiB")
+        if card["type"] != "MMC":
+            raise evk.BoardError("mmc 0 is not the eMMC; set SYS[1] = OFF on the module")
+        if card["capacity"] < man["image_size"]:
+            raise evk.BoardError(f"eMMC too small: {card['capacity']} < image {man['image_size']} bytes")
+        print("network:", con.net_setup())
+        con.write_chunks(man, rel, verify=True)
+        if not a.no_saveenv:      # Start-up Guide 8.2.4: the eMMC boot environment
+            con.cmd("env default -a")
+            out = con.cmd("saveenv", timeout=30)
+            if "OK" not in out:
+                raise evk.BoardError(f"saveenv: {out!r}")
+            print("env: default environment saved to eMMC")
+        con.buf = ""
+        con.send("reset\r")
+        t0 = time.time()
+        con.expect([a.expect], a.wait)
+        print(f"boot check: '{a.expect}' seen {time.time() - t0:.0f}s after reset (eMMC boot)")
+    finally:
+        con.close()
+    print("OK")
+
+
+if __name__ == "__main__":
+    main()

@@ -17,8 +17,12 @@ from pathlib import Path
 RZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RZ / "eval"))
 from fake_uboot import FakeUBoot  # noqa: E402
+sys.path.insert(0, str(RZ / "workflow" / "board"))
+import evk  # noqa: E402
 
 TOOL = RZ / "workflow" / "board" / "evk-write-sd"
+EMMC_TOOL = RZ / "workflow" / "board" / "evk-write-emmc"
+DEPLOY = Path("/home/mpu-epmaj/max/workspace/rzg3l-bsp-v1/build/tmp/deploy/images/smarc-rzg3l")
 WORK = Path("/tmp/board-tests")
 fails = []
 
@@ -50,9 +54,7 @@ def synthetic_image(path: Path, size=8 << 20, bs=4096) -> Path:
 
 
 def sd_matches_bmap(sd: Path, bmap: Path) -> bool:
-    ews = {"__file__": str(TOOL), "__name__": "evk_write_sd"}      # the tool's own bmap parser
-    exec(compile(TOOL.read_text(), str(TOOL), "exec"), ews)
-    bm = ews["read_bmap"](bmap)
+    bm = evk.read_bmap(bmap)                                      # the tools' own bmap parser
     with open(sd, "rb") as f:
         for a, b, chk in bm["ranges"]:
             f.seek(a * bm["block_size"])
@@ -62,18 +64,18 @@ def sd_matches_bmap(sd: Path, bmap: Path) -> bool:
     return True
 
 
-def run_tool(image: Path, fake: FakeUBoot | None, tftp: Path, *extra) -> subprocess.CompletedProcess:
-    args = [sys.executable, str(TOOL), "--image", str(image), "--tftp-root", str(tftp),
+def run_tool(image: Path, fake: FakeUBoot | None, tftp: Path, *extra, tool: Path = TOOL) -> subprocess.CompletedProcess:
+    args = [sys.executable, str(tool), "--image", str(image), "--tftp-root", str(tftp),
             "--log-dir", str(WORK / "logs"), "--wait", "20", *extra]
     if fake:
         args += ["--port", fake.port]
     return subprocess.run(args, capture_output=True, text=True, timeout=1800)
 
 
-def case(name, image, tftp, extra=(), **fake_kw):
+def case(name, image, tftp, extra=(), tool=TOOL, **fake_kw):
     sd = WORK / f"sd-{name}.img"
     fake = FakeUBoot(tftp, sd, 2 << 30, **fake_kw)
-    r = run_tool(image, fake, tftp, *extra)
+    r = run_tool(image, fake, tftp, *extra, tool=tool)
     fake.stop = True
     return r, fake, sd
 
@@ -119,6 +121,42 @@ def main():
     r = run_tool(bad, None, tftp, "--prepare-only")
     check(r.returncode != 0 and "refusing a bmap with a DOCTYPE" in r.stderr, "bmap with DOCTYPE/ENTITY is refused")
 
+
+    # ---- eMMC boot: Flash Writer (BL2, FIP, CM33) + rootfs from U-Boot
+    def boot1_ok(boot1: Path) -> bool:
+        with open(boot1, "rb") as f:
+            for name, sector in (("bl2_bp_mmc-smarc-rzg3l", 0x1), ("fip-smarc-rzg3l", 0x300), ("lpdemo-cm33-fw-smarc-rzg3l", 0x1380)):
+                want = (DEPLOY / f"{name}.bin").read_bytes()
+                f.seek(sector * 512)
+                if f.read(len(want)) != want:
+                    print(f"   boot partition 1 at sector {sector:#x} differs from {name}.bin")
+                    return False
+        return True
+
+    def emmc_case(name, image, extra=(), **kw):
+        b1 = WORK / f"boot1-{name}.img"
+        r, fake, sd = case(name, image, tftp, ("--deploy", str(DEPLOY), *extra), tool=EMMC_TOOL, boot1=b1, **kw)
+        return r, fake, sd, b1
+
+    r, fake, sd, b1 = emmc_case("emmc-full", img, scif=True)
+    check(r.returncode == 0 and r.stdout.count("需要你操作") == 2, f"eMMC: board without U-Boot, two manual steps ({r.stderr[-300:]})")
+    check(boot1_ok(b1), "eMMC boot partition 1: bl2 @0x1, fip @0x300, cm33 @0x1380 equal the build's .bin files")
+    check(fake.ext_csd.get(0xB1) == 0x02 and fake.ext_csd.get(0xB3) == 0x08, "EXT_CSD B1=0x02, B3=0x08 (Start-up Guide Table 13)")
+    check(sd_matches_bmap(sd, bmap), "eMMC user area matches every bmap sha256")
+    check("env: default environment saved" in r.stdout and "boot check: 'login:' seen" in r.stdout, "saveenv, then reset boots to login")
+
+    r, fake, sd, b1 = emmc_case("emmc-on-sd", img, ("--skip-bootloader",), mmc_type="SD")
+    check(r.returncode != 0 and "not the eMMC" in (r.stdout + r.stderr) and fake.writes == 0, "eMMC tool refuses an SD card (SYS[1] = ON); nothing written")
+
+    alt = WORK / "deploy-mismatch"
+    alt.mkdir()
+    for f in DEPLOY.glob("*"):
+        if f.name.startswith(("Flash_Writer", "bl2_bp_mmc", "fip-smarc-rzg3l.", "lpdemo-cm33-fw-smarc-rzg3l.")) and f.is_file():
+            shutil.copy(f.resolve(), alt / f.name)
+    (alt / "fip-smarc-rzg3l.bin").write_bytes(b"other build")
+    r = run_tool(img, None, tftp, "--deploy", str(alt), "--prepare-only", tool=EMMC_TOOL)
+    check(r.returncode != 0 and "does not match fip-smarc-rzg3l.bin" in r.stderr, "boot files from different builds are refused before touching the board")
+
     if a.real_image:
         real = a.real_image.resolve()
         r, fake, sd = case("real", real, tftp, ("--no-boot-check",))
@@ -126,6 +164,10 @@ def main():
         check(r.returncode == 0, f"real image written through fake U-Boot ({r.stderr[-300:]})")
         check(sd_matches_bmap(sd, Path(str(real).replace(".wic.gz", ".wic.bmap"))),
               "real image: fake SD matches every bmap sha256 (known answer)")
+        r, fake, sd, b1 = emmc_case("real-emmc", real, scif=True)
+        print(r.stdout[-700:])
+        check(r.returncode == 0 and boot1_ok(b1) and sd_matches_bmap(sd, Path(str(real).replace(".wic.gz", ".wic.bmap"))),
+              "real image, eMMC flow: boot partition 1 equals the .bin files and the user area matches the bmap")
 
     print(f"\n{len(fails)} failed")
     sys.exit(1 if fails else 0)
