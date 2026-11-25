@@ -25,6 +25,7 @@ FW_PROMPT = r"\n>[>\s]*$"             # Flash Writer prompt; a trailing CR LF of
 PORT = "/dev/rzg3l-evk-console"       # udev symlink from setup-host.sh
 LOADADDR = 0x58000000                  # CONFIG_SYS_LOAD_ADDR; U-Boot reports 896 MiB of DRAM from 0x40000000
 HOST_IP, BOARD_IP, NETMASK = "192.168.50.1", "192.168.50.2", "255.255.255.0"
+LOCAL_MACS = ("02:52:5a:47:33:4c", "02:52:5a:47:33:4d")   # locally administered ("RZG3L"), direct link only
 SECTOR = 512
 
 
@@ -172,10 +173,20 @@ class Console:
             self._pump()
 
     # ---- BootROM SCIF download mode and Flash Writer ----
-    def scif_download(self, mot: Path, wait: float) -> str:
-        """BootROM in SCIF download mode -> send Flash Writer -> its prompt. Returns the Flash Writer banner line."""
-        self.buf = ""
-        self.expect([r"please send !"], wait)
+    def scif_download(self, mot: Path, wait: float, already_waiting: bool = False) -> str:
+        """BootROM in SCIF download mode -> send Flash Writer -> its prompt. Returns the Flash Writer banner line.
+
+        The EVK's BootROM prints "SCI Download mode (Normal SCI boot)" / "-- Load Program to SRAM ---" and then
+        waits silently (seen on the board 2026-11-25); the Start-up Guide rc1 shows "SCIF Download mode" /
+        "-- Load Program to SystemRAM ---" / "please send !". Both are accepted. already_waiting: the BootROM
+        banner was printed before this run, so send at once."""
+        if not already_waiting:
+            self.buf = ""
+            self.expect([r"please send !", r"-- Load Program to S\w*RAM"], wait)
+            try:                                   # the rc1 wording adds "please send !" after the Load line
+                self.expect([r"please send !"], 1.0)
+            except TimeoutError:
+                pass
         print(f"BootROM: SCIF download mode; sending {mot.name} at 115200 bps ...", flush=True)
         self.send_file(mot)
         _, text = self.expect([r"Flash writer for RZ/G3L[^\n]*"], 120)
@@ -264,17 +275,27 @@ class Console:
         return {"type": m.group(1), "capacity": int(size), "info": info}
 
     def net_setup(self) -> str:
-        """Static addresses (no DHCP needed). Try eth0, then eth1 (the two RJ45 jacks of Carrier II)."""
+        """Static addresses (no DHCP needed). Try eth0, then eth1 (the two RJ45 jacks of Carrier II).
+
+        The EVK has no MAC address for U-Boot: without ethaddr both ports fail with "No valid MAC address found"
+        and U-Boot prints "No ethernet found" (seen 2026-11-25). Locally administered MACs are set in RAM only
+        (not saved; evk-write-emmc resets to the default environment before saveenv). A port without a cable
+        costs a PHY auto-negotiation timeout before U-Boot moves on to the next port, hence the long ping wait."""
+        if "not defined" in self.cmd("printenv ethaddr"):
+            self.cmd(f"setenv ethaddr {LOCAL_MACS[0]}")
+            self.cmd(f"setenv eth1addr {LOCAL_MACS[1]}")
         for k, v in (("ipaddr", BOARD_IP), ("serverip", HOST_IP), ("netmask", NETMASK)):
             self.cmd(f"setenv {k} {v}")
         for eth in ("eth0", "eth1"):
             self.cmd(f"setenv ethact {eth}")
-            out = self.cmd(f"ping {HOST_IP}", timeout=20)
+            out = self.cmd(f"ping {HOST_IP}", timeout=60)
             if f"host {HOST_IP} is alive" in out:
-                dev = re.search(r"Using (\S+) device", out)
-                return f"{eth} ({dev.group(1) if dev else '?'})"
+                devs = re.findall(r"Using (\S+) device", out)
+                if devs:
+                    self.cmd(f"setenv ethact {devs[-1]}")   # keep the port that works; skip the dead one's timeout
+                return f"{eth} ({devs[-1] if devs else '?'})"
         raise BoardError("ping 主机失败：确认 USB 网卡接在 Carrier II 的 RJ45 口上，并且主机端 evk-direct 已经连上"
-                         "（nmcli con show evk-direct）。若 U-Boot 打印 'No ethernet found'，则这个 U-Boot 没有可用网口")
+                         "（nmcli con show evk-direct）")
 
     def tftp(self, addr: int, path: str, size: int) -> None:
         out = self.cmd(f"tftpboot {addr:#x} {path}", timeout=max(60, size / 2e5))

@@ -312,6 +312,33 @@ Tesera 是 RZ/G2L 客户板的 bring-up（`MACHINE=rzg2l-tlc-01`，VLP v4.0.2，
 - 不需要恢复 Linux 网口：写入用的是 U-Boot 的网络。fast-boot 层只在 Linux 侧（内核配置、设备树、systemd）关掉了网口，没有动 U-Boot 的网络；启动确认用的是串口上的 `login:`（getty 在 ttySC3 上）。
 - 还没在实机上运行：需要用户先执行 `setup-host.sh`，并接好板子。首次实机运行时要确认三件事：U-Boot 的网口能否工作（Start-up Guide 里旧版 U-Boot 显示 "No ethernet found"）；Flash Writer 实际打印的文字是否和 rc1 版指南一致；CM33 固件写在 0x1380 能否正常启动（LowPower 指南注明为 Not Verified）。
 
+**首次实机运行（2026-11-25，eMMC 启动，lpdemo-image-…-20261125062116）：成功。**
+
+板子开始时没有任何 bootloader，最后从 eMMC 启动到了 `login:`。整个过程中人只做了两件事：先拨到 SCIF 下载模式上电，再拨到 eMMC 启动并重新上电。
+
+- 阶段 1，Flash Writer 为 V1.00 Jul.07,2026，各步耗时：
+
+  | 写入内容 | 位置 | 耗时 |
+  |---|---|---|
+  | bl2_bp_mmc | boot 分区 1，sector 0x1 | 11 s |
+  | fip | sector 0x300 | 70 s |
+  | lpdemo-cm33-fw | sector 0x1380 | 9 s |
+
+  另外设置了 EXT_CSD：B1 = 0x02，B3 = 0x08。
+- 阶段 2：
+  - 用 TFTP 写入 562 MiB，耗时 558 s，约 1.0 MiB/s；
+  - 读回校验 20 块，CRC32 全部一致，耗时 24 s；
+  - 执行 `saveenv` 后 `reset`，8 s 后出现 `login:`。
+- 启动日志里 U-Boot 打印了 `fla: ... CM33 state 1`。说明 CM33 固件放在 eMMC boot 分区的 0x1380 处，可以被正常加载和运行；LowPower 指南 §4.1 中标注为 Not Verified 的这一项，在这块板子上得到了确认。
+
+**实机和文档不一致的地方**（都已修正进工具）：
+
+1. **BootROM 打印的文字**：实际是 `SCI Download mode (Normal SCI boot)` 和 `-- Load Program to SRAM ---`，之后**没有** `please send !`。Start-up Guide rc1 写的是 `SCIF Download mode`、`… SystemRAM`、`please send !`。工具现在两种文字都能识别；另外加了 `--bootrom-waiting`，用于 BootROM 已经打印过提示、需要立刻发送的情况。
+2. **U-Boot 的网口**：两个网口都报 `No valid MAC address found`，所以 U-Boot 显示 `No ethernet found`。Start-up Guide 里那行 `No ethernet found` 很可能也是这个原因。临时设置本地管理型 MAC 之后，网口就能用了。这个 MAC 只在内存里，`env default -a` 之后不会被保存。
+3. **网线接在哪个口**：这次网线接在 GBE1（`ethernet@11c40000`）。没接线的 eth0 会先等待 PHY 自协商超时，之后 U-Boot 才自动换到下一个口。
+
+后续可以改进的地方：TFTP 只有约 1 MiB/s，可以试一下调大 `tftpblocksize` 或 `tftpwindowsize`（dnsmasq 是否支持需要实测）；上板验证可以再加上对 `CM33 state` 等启动日志的检查。
+
 **方案**（B3 时实施）
 
 | 项目 | 设置 |

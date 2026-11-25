@@ -80,8 +80,8 @@ class FakeUBoot:
                     self.ready = now
                 if self.ready and now - self.ready > 1.0:   # ...and a person reacted to its request: power on
                     if self.mode == "scif":
-                        self.out("\n SCIF Download mode\n (C) Renesas Electronics Corp.\n"
-                                 "-- Load Program to SystemRAM ---------------\nplease send !\n")
+                        self.out("\x00\nSCI Download mode (Normal SCI boot)\n\n"    # as the EVK printed (2026-11-25)
+                                 "-- Load Program to SRAM  ---------------\n")
                         self.state, self.fw, self.banner_at = "bootrom", {"step": "mot", "lines": []}, now
                     else:
                         self.out("\nNOTICE:  BL2: v2.10.4(release)\n\nU-Boot 2024.07 (Nov 25 2026)\n\n"
@@ -208,6 +208,8 @@ class FakeUBoot:
         a = line.split()
         if not a:
             return ""
+        if a[0] == "printenv":
+            return "\n".join(f"{k}={self.env[k]}" if k in self.env else f'## Error: "{k}" not defined' for k in a[1:])
         if a[0] == "setenv":
             self.env[a[1]] = a[2] if len(a) > 2 else ""
             return ""
