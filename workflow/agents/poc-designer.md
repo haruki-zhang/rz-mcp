@@ -44,14 +44,14 @@ disallowedTools: Agent
   - 先用 `search_docs` 找，再用 `get_section` 或 `read_pages` 读原文；
   - 寄存器用 `lookup_register` 和 `search_registers`；
   - 引用前必须读过原文，不能只凭检索结果里的片段。
-- **官方源码**：从 DL_DIR 的 git 镜像读取，不需要检出。
-  - 镜像位置：`$PRJ/build/downloads/git2/`，包括 `github.com.renesas-rz.rz_linux-cip.git`、`github.com.renesas-rz.renesas-u-boot-cip.git`、`github.com.renesas-rz.rzg_trusted-firmware-a.git`；
-  - rev 从 `$PRJ/meta-renesas` 的配方里读：
-    - kernel：`meta-rz-bsp/recipes-kernel/linux/linux-renesas_6.12.bb` 中的 `KERNEL_REV:rzg3l-family`；
-    - U-Boot：`meta-rz-bsp/recipes-bsp/u-boot/u-boot_2024.07.bb` 中的 `UBOOT_REV:rzg3l-family`；
-    - TF-A：`meta-rz-bsp/recipes-bsp/trusted-firmware-a/trusted-firmware-a_2.10.bb` 中的 `TFA_REV:rzg3l-family`；
-  - 读取的方法：`git --git-dir=<镜像> show <rev>:<路径>`、`git --git-dir=<镜像> grep -n <模式> <rev> -- <路径>`、`git --git-dir=<镜像> log <rev> -- <路径>`；
-  - Renesas 补丁在 `$PRJ/meta-renesas` 的配方和补丁文件里。
+- **官方源码和版本**：用 MCP 的 rz-docs 工具，不要自己去拼 git 命令。
+  - `get_bsp_release`：查官方 BSP 的各层 pin、kernel / U-Boot / TF-A 的 rev、专有包，以及 eMMC 和 QSPI 的写入地址；
+  - `bsp_source`：读官方 rev 上的某个文件，或者列出某个目录；
+  - `bsp_grep`：在官方源码里检索；
+  - `patch_stack`：看各个层在官方 rev 之上加了哪些补丁，每个补丁出自哪个层、哪个 PoC；
+  - `check_build_env`：看当前的构建配置和官方发布有哪些不同。
+
+  这些工具读取的是 DL_DIR 里 git 镜像中的官方 rev，引用时写成 `仓库:路径:行@rev`（rev 取前 12 位）。
 - **过去的 PoC**：`$PRJ` 下的其他 PoC 仓库，例如 `rzg3l-lowpower-display`、`rzg3l-fast-boot-seamless-logo`、`MultiCore-Display`。它们的文档、层和补丁都可以读，引用时写明"过去 PoC"。
 - **不要把 `$PRJ/build/tmp/work-shared/` 当作官方源码。** 它是最近一次构建的结果，带着其他 PoC 的补丁。如果确实要看，必须在引用时注明"某 PoC 修改后的树"。
 

@@ -1,4 +1,4 @@
-# workflow/：RZ/G3L PoC 工作流（第 1～4 步）
+# workflow/：RZ/G3L PoC 工作流
 
 流程的定义见 `plan/PoC_Workflow_Plan.md` 第 3 节。本目录是流程工具的唯一来源，已纳入 rz-mcp 的 git 管理。
 
@@ -10,6 +10,8 @@
 | `agents/poc-merger.md` | 第 3 步的比较融合 Agent |
 | `templates/poc/` | 交付物骨架：README、指南、image/README、md2pdf.py |
 | `templates/design/` | 第 1～4 步的文件模板，包括设计模板 `design-template.md` |
+| `build/` | 第 5 步：`poc-use`、`poc-build`、`poc-package`，见 [build/README.md](build/README.md) |
+| `board/` | 第 6 步：`evk-flash`（写 bootloader 和 rootfs），见 [board/README.md](board/README.md) |
 
 Yocto 项目默认是与 rz-mcp 同级的 `rzg3l-bsp-v1/`，可以用环境变量 `RZ_POC_PROJECT` 指定其他目录。
 

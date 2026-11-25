@@ -87,6 +87,15 @@ journalctl --user -u rz-mcp -f            # 查看日志
 
 结构化寄存器目前覆盖 WDT、SCIFA、CPG，其他模块请用 `search_docs` 和 `get_section`。
 
+**BSP 版本与源码**（B1c）。这几个工具读取的是 DL_DIR 里 git 镜像中的官方 rev，不会读 work-shared 下带着 PoC 补丁的源码树：
+
+| 工具 | 用途 |
+|---|---|
+| `get_bsp_release` | 官方 BSP 的信息：各层 pin、TEMPLATECONF、kernel / U-Boot / TF-A 的 rev（会和本地 meta-renesas 对照）、专有包，以及 eMMC 和 QSPI 的写入地址 |
+| `bsp_source` / `bsp_grep` | 读取官方 rev 上的文件或目录，或在其中检索 |
+| `patch_stack` | 各层在官方 rev 之上加了哪些补丁；对于内核，还会把上次构建实际打上的每个提交，对应到出自哪个层的哪个补丁 |
+| `check_build_env` | 对比当前构建配置和官方发布：模板、MACHINE、DISTRO、额外的层及其所属的 PoC、RM_WORK_EXCLUDE、各组件的 pin 和镜像 |
+
 ## Prompt：PoC 工作流
 
 | Prompt | 用途 |

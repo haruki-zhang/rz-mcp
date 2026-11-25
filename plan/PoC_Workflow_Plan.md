@@ -284,6 +284,18 @@ Tesera 是 RZ/G2L 客户板的 bring-up（`MACHINE=rzg2l-tlc-01`，VLP v4.0.2，
 
   这两项要在第一次实际使用时由用户确认。
 
+- **B1b 暂缓**（用户决定，2026-11-25）：设计 Agent 已经可以直接读取过去的 PoC 仓库。是否还需要收进 MCP，等小实验做完再定。
+- **B1c 完成**：`catalog/bsp_releases.toml` 和 MCP 工具 `get_bsp_release`、`bsp_source`、`bsp_grep`、`patch_stack`、`check_build_env`（`src/rzmcp/bsp.py`）。
+  - 已知答案测试：
+    - pin 和 rev 和今天手工核实的结果一致；
+    - `bsp_source`、`bsp_grep` 的结果和直接执行 `git show`、`git grep` 一致；
+    - 上次内核构建在官方 rev 之上的 22 个提交，全部找到了出自哪个层的哪个补丁：20 个按标题对应，2 个 multi-os 的纯 diff 补丁按改动的文件对应。
+  - 两个设计 Agent 的说明已改为使用这些工具。
+- **B2 完成，洁净室复现除外**：`workflow/build/` 下的 `poc-use`（含 `--capture`）、`poc-build` 和 `poc-package`。
+  - `poc-use` 的往返测试：当前的 combo 配置提取成片段后再重新生成，层列表完全相同，`local.conf` 的语句全部保留，只多了标准的 `RM_WORK_EXCLUDE`；
+  - `poc-package` 打包 rzg3l-lowpower-display，目录结构和它本身一致，`SHA256SUMS` 校验通过。
+  - 测试共 39 项（`eval/test_b1c_b2.py`），全部通过。
+
 默认的存放位置如下，需要时可以改：
 
 - 脚本和模板放在 rz-mcp 的 `workflow/` 下，由 MCP 以 prompts 和 resources 的形式提供；

@@ -1,0 +1,53 @@
+# BSP releases for the devices in the catalog (one source for get_bsp_release / check_build_env / poc-package).
+# Layer pins and TEMPLATECONF: Renesas RZ Linux BSP Plus, "How To Build Linux BSP Plus" (RZ/G), RZ/G3L tab.
+# Component revisions: what the release's meta-renesas recipes pin for rzg3l-family; at run time they are also
+# read from the Yocto project's meta-renesas and compared with these values.
+
+[releases."RZG3L-BSP-1.0.0"]
+device = "rzg3l"
+title = "Renesas RZ Linux BSP Plus for RZ/G3L"
+machine = "smarc-rzg3l"
+yocto = "scarthgap (poky scarthgap-5.0.14)"
+template = "meta-renesas/meta-rz-distro/conf/templates/bsp-plus-conf"
+source = "https://renesas-rz.github.io/rz_linux_bsp_plus/RZG/how_to_build_linux_bsp_plus/ (RZ/G3L, RZ/G3SE tab; read 2026-11-25)"
+note = "meta-renesas tag RZG3L-BSP-1.0.0 is the same commit as BSP-PLUS-K6.12-V4.0 (git ls-remote, 2026-11-25)"
+
+layers = [
+  { name = "poky", url = "https://git.yoctoproject.org/git/poky", rev = "7e8674996b0164b07e56bc066d0fba790e627061" },
+  { name = "meta-arm", url = "https://git.yoctoproject.org/meta-arm", rev = "8e0f8af90fefb03f08cd2228cde7a89902a6b37c" },
+  { name = "meta-openembedded", url = "https://git.openembedded.org/meta-openembedded", rev = "89a01c3d9ad1f8fce6aeb4dd0e694cfa28d42099" },
+  { name = "meta-renesas", url = "https://github.com/renesas-rz/meta-renesas", tag = "RZG3L-BSP-1.0.0", rev = "4823845d3a9a772324218ba753a0e7983905c924" },
+]
+
+# Not in git: download from renesas.com (login), then extract into the Yocto project (How To Build, Step 1 / 2.5).
+proprietary = [
+  { name = "graphics", part = "RTK0EF0045Z14001ZJ", layer = "meta-rz-features/meta-rz-graphics", needed_for = "core-image-weston with the GPU" },
+  { name = "codec", part = "RTK0EF0045Z16002ZJ", layer = "meta-rz-features/meta-rz-codecs", needed_for = "video codec (includes a prebuilt archive)" },
+]
+
+[releases."RZG3L-BSP-1.0.0".components.kernel]
+recipe = "meta-rz-bsp/recipes-kernel/linux/linux-renesas_6.12.bb"
+rev_var = "KERNEL_REV"
+extra_vars = ["KERNEL_BRANCH", "LINUX_VERSION"]
+mirror = "github.com.renesas-rz.rz_linux-cip.git"
+rev = "e6c894b7436f14ba9ddda9e5807d3e19e9e2e803"
+branch = "rz-6.12-cip8"
+version = "6.12.46-cip8"
+work = "work-shared/smarc-rzg3l/kernel-source"
+
+[releases."RZG3L-BSP-1.0.0".components.u-boot]
+recipe = "meta-rz-bsp/recipes-bsp/u-boot/u-boot_2024.07.bb"
+rev_var = "UBOOT_REV"
+extra_vars = []
+mirror = "github.com.renesas-rz.renesas-u-boot-cip.git"
+rev = "16e6324c9125c6c99e762214137c47d9d7b3ea7f"
+config = "smarc-rzg3l_defconfig"
+work = "work/smarc_rzg3l-poky-linux/u-boot"
+
+[releases."RZG3L-BSP-1.0.0".components.tf-a]
+recipe = "meta-rz-bsp/recipes-bsp/trusted-firmware-a/trusted-firmware-a_2.10.bb"
+rev_var = "TFA_REV"
+extra_vars = []
+mirror = "github.com.renesas-rz.rzg_trusted-firmware-a.git"
+rev = "c06209f12ff5d3a94e674a7f46fd01ec76356928"
+work = "work/smarc_rzg3l-poky-linux/trusted-firmware-a"

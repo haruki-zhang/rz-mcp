@@ -1,0 +1,125 @@
+#!/usr/bin/env python3
+"""Package a PoC's deliverables in the layout of rzg3l-lowpower-display (step 5).
+
+    workflow/build/poc-package <poc> --image <deploy>/<image>-smarc-rzg3l.rootfs-<time>.wic.gz [--version v1.0]
+                               [--out DIR] [--no-pdf] [--force]
+
+Result: <poc>/dist/<repo>-<version>/ with README.md, docs/ (guide .md and .pdf), layers/, image/ (README.md,
+<image>.rootfs.wic.gz, .wic.bmap), tools/, plus versions.json (BSP release, component revisions, every layer of the
+build with its git revision, sha256 of the boot files and the image, the build/conf it was built with) and
+SHA256SUMS. design/, build-conf/, dist/ and .git are never included. Refuses a skeleton (no guide, empty layers/).
+"""
+import argparse
+import hashlib
+import json
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(ROOT / "src"))
+from rzmcp import bsp as B  # noqa: E402
+from rzmcp import yocto as Y  # noqa: E402
+
+SKIP = {".git", "design", "build-conf", "dist", "__pycache__"}
+BOOT_FILES = ["bl2_bp_esd-smarc-rzg3l.bin", "bl2_bp_mmc-smarc-rzg3l.bin", "bl2_bp_spi-smarc-rzg3l.bin", "fip-smarc-rzg3l.bin"]
+
+
+def sha256(p: Path) -> str:
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        for b in iter(lambda: f.read(1 << 20), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
+def git_rev(path: Path) -> str | None:
+    r = subprocess.run(["git", "-C", str(path), "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    if r.returncode != 0:
+        return None
+    top = r.stdout.strip()
+    rev = subprocess.run(["git", "-C", top, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    dirty = subprocess.run(["git", "-C", top, "status", "--porcelain", "--", str(path)], capture_output=True, text=True).stdout.strip()
+    return rev + ("-dirty" if dirty else "")
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("poc")
+    ap.add_argument("--image", type=Path, required=True)
+    ap.add_argument("--version", default="v1.0")
+    ap.add_argument("--out", type=Path)
+    ap.add_argument("--no-pdf", action="store_true", help="keep the PDF in docs/ as it is (no re-render)")
+    ap.add_argument("--force", action="store_true")
+    ap.add_argument("--project", type=Path, default=Y.project_dir())
+    a = ap.parse_args()
+    project = a.project.resolve()
+    poc = next((p.resolve() for p in (Path(a.poc), project / a.poc, project / f"rzg3l-{a.poc}") if p.is_dir()), None)
+    if poc is None:
+        sys.exit(f"no PoC repository {a.poc!r}")
+    image = a.image.resolve()
+    bmap = Path(str(image).replace(".wic.gz", ".wic.bmap"))
+    if not image.name.endswith(".wic.gz") or not image.exists() or not bmap.exists():
+        sys.exit("need an existing .wic.gz with its .wic.bmap")
+    guides = sorted((poc / "docs").glob("*-Guide.md"))
+    real_layers = [d for d in (poc / "layers").glob("*") if (d / "conf" / "layer.conf").exists()] if (poc / "layers").is_dir() else []
+    if not (poc / "README.md").exists() or not guides or not real_layers:
+        sys.exit(f"{poc.name} is not ready to deliver: needs README.md, docs/*-Guide.md and at least one layer in layers/")
+    if "{TITLE}" in (poc / "README.md").read_text() or "<!--" in guides[0].read_text()[:2000]:
+        print("warning: README.md or the guide still contains template placeholders or comments")
+
+    out = (a.out or poc / "dist" / f"{poc.name}-{a.version}").resolve()
+    if out.exists():
+        if not a.force:
+            sys.exit(f"{out} exists; use --force to replace it")
+        shutil.rmtree(out)
+    out.mkdir(parents=True)
+    for item in sorted(poc.iterdir()):
+        if item.name in SKIP or item.name == "image" or item.name.startswith("."):
+            continue
+        if item.is_dir():
+            shutil.copytree(item, out / item.name, ignore=shutil.ignore_patterns(*SKIP))
+        else:
+            shutil.copy2(item, out / item.name)
+    img_dir = out / "image"
+    img_dir.mkdir()
+    if (poc / "image" / "README.md").exists():
+        shutil.copy2(poc / "image" / "README.md", img_dir / "README.md")
+    plain = re.sub(r"\.rootfs-\d{14}\.", ".rootfs.", image.name)          # the deploy symlink name, as delivered
+    shutil.copy2(image, img_dir / plain)
+    shutil.copy2(bmap, img_dir / plain.replace(".wic.gz", ".wic.bmap"))
+    if not a.no_pdf:
+        for g in guides:
+            md2pdf = out / "tools" / "md2pdf.py"
+            r = subprocess.run([sys.executable, str(md2pdf), str(out / "docs" / g.name), str(out / "docs" / g.with_suffix(".pdf").name)],
+                               cwd=out, capture_output=True, text=True, timeout=600)
+            if r.returncode != 0:
+                sys.exit(f"md2pdf failed for {g.name}: {r.stderr[-500:]}")
+
+    deploy = image.parent
+    build = project / "build"
+    rel = Y.release()
+    layers = Y.bblayers(build / "conf" / "bblayers.conf", build)
+    conf = build / "conf" / "poc-use.json"
+    versions = {
+        "package": f"{poc.name}-{a.version}", "poc_repo_rev": git_rev(poc),
+        "bsp": {"release": Y.DEFAULT_RELEASE, "layers": rel["layers"], "template": rel["template"]},
+        "components": {n: {k: B.component(n)[k] for k in ("rev", "local_rev")} for n in B.COMPONENTS},
+        "build_conf": json.loads(conf.read_text()) if conf.exists() else "build/conf not written by poc-use",
+        "layers": [{"path": str(l.relative_to(project)) if l.is_relative_to(project) else str(l),
+                    "owner": Y.owner_of(l, project), "git": git_rev(l)} for l in layers],
+        "image": {"file": plain, "built": image.name, "sha256": sha256(image), "bmap_sha256": sha256(bmap)},
+        "boot_files": {f: sha256((deploy / f).resolve()) for f in BOOT_FILES if (deploy / f).exists()},
+        "note": "build_conf/layers describe the build directory when the package was made; build the image with "
+                "poc-use + poc-build right before packaging so that they match the image",
+    }
+    (out / "versions.json").write_text(json.dumps(versions, indent=1, ensure_ascii=False))
+    files = sorted(p for p in out.rglob("*") if p.is_file() and p.name != "SHA256SUMS")
+    (out / "SHA256SUMS").write_text("".join(f"{sha256(p)}  {p.relative_to(out)}\n" for p in files))
+    print(f"package: {out}  ({len(files)} files, image {plain})")
+
+
+if __name__ == "__main__":
+    main()
