@@ -30,7 +30,7 @@ workflow/board/evk-write-emmc --image <deploy>/<x>.wic.gz    # 启动文件从�
 
 | 阶段 | 人做什么 | 工具做什么 |
 |---|---|---|
-| 1 | SW_MODE[1:3] = OFF ON OFF（SCIF 下载模式），模块 SYS[1] = OFF（eMMC），上电 | 以 115200 发送 Flash Writer，`SUP` 切到 921600；`EM_W` 写入：bl2_bp_mmc → 分区 1 sector 0x1（加载地址 0x21e00），fip → 0x300（0x0），lpdemo-cm33-fw → 0x1380（0x0）；`em_secsd` 设 B1=0x02、B3=0x08 |
+| 1 | SW_MODE[1:3] = OFF ON OFF（SCIF 下载模式）。模块上的 BOOT 和 SYS 全部为出厂默认 OFF：SYS[1] = OFF 表示 SD0 接 eMMC，BOOT[2] = OFF 表示 CA55 冷启动（模块手册 R01UH1193EJ0100 §2.4.1、§2.4.2）。然后上电 | 以 115200 发送 Flash Writer，`SUP` 切到 921600；`EM_W` 写入：bl2_bp_mmc → 分区 1 sector 0x1（加载地址 0x21e00），fip → 0x300（0x0），lpdemo-cm33-fw → 0x1380（0x0）；`em_secsd` 设 B1=0x02、B3=0x08 |
 | 2 | SW_MODE[1:3] = ON OFF OFF（eMMC），Carrier 上的 microSD1 槽不插卡，断电后重新上电 | U-Boot 进入 `mmc dev 0 0`（必须是 eMMC），通过 TFTP 写入 user 区，读回校验，`env default -a; saveenv`，执行 `reset`，等待 `login:` |
 
 地址的出处：Start-up Guide R01US0858EJ0100 §8.2.1 表 13 和表 14；CM33 固件的地址来自 LowPower 指南 §4.1，该节注明为 "Not Verified"。

@@ -93,7 +93,8 @@ def main() -> None:
     con = evk.Console(a.port, log=str(log))
     try:
         if not a.skip_bootloader:
-            evk.human("设成 SCIF 下载模式：SW_MODE[1:3] = OFF ON OFF；模块 SYS[1] = OFF（eMMC）。然后上电，或者按复位键。")
+            evk.human("设成 SCIF 下载模式：SW_MODE[1:3] = OFF ON OFF。模块上的 BOOT 和 SYS 开关全部为出厂默认 OFF，"
+                      "其中 SYS[1] = OFF（SD0 接 eMMC），BOOT[2] = OFF（CA55 冷启动）。然后按 POWER 上电，或者按 RESET。")
             print("flash writer:", con.scif_download(deploy / MOT, a.wait))
             con.fw_speed_up()
             print("flash writer: 921600 bps")
