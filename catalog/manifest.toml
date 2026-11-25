@@ -1,0 +1,838 @@
+# Document catalog: the single source of truth for document metadata.
+# The directory tree under docs/ only groups files by owner (device / board / family);
+# relations that a tree cannot express (one doc -> many devices, one board -> many SoMs)
+# live here. The indexer reads ONLY files listed here.
+#
+# doc_type : hw_manual | datasheet | app_note | quick_start | board_manual | schematic | bom
+#            | errata | sw_manual | component_datasheet
+# index    : fulltext (sections + page text + FTS), registers (HW UM register tables), bom (rows)
+# outline  : bookmarks (PDF bookmarks = section tree) | schematic (use "Design Hierarchy"
+#            bookmarks = sheet names) | none (page-level chunks only)
+schema_version = 1
+
+[devices.rzg3l]
+name = "RZ/G3L"
+family = "RZ/G"
+
+[devices.rzg3se]
+name = "RZ/G3SE"
+family = "RZ/G"
+note = "Covered by the same HW UM / datasheet as RZ/G3L"
+
+[boards.rzg3l-evk]
+name = "RZ/G3L Evaluation Board Kit"
+devices = ["rzg3l"]
+components = ["rzg3l-smarc-module", "rz-smarc-carrier2"]
+
+[boards.rzg3l-smarc-module]
+name = "RZ/G3L SMARC Module Board"
+devices = ["rzg3l"]
+
+[boards.rz-smarc-carrier2]
+name = "RZ SMARC Series Carrier Board II"
+devices = ["rzg3l", "rzg3e", "rzg3s"]
+note = "Shared carrier board for several SMARC modules"
+
+[boards.rz-smarc-rgb-hdmi2]
+name = "RZ SMARC RGB-HDMI2 Adaptor"
+devices = ["rzg3l"]
+
+[boards.rz-smarc-breakout]
+name = "RZ SMARC Breakout Board"
+devices = ["rzg3l"]
+
+[boards.rz-smarc-dual-lvds-hdmi]
+name = "RZ SMARC Dual LVDS-HDMI Adaptor"
+devices = ["rzg3l", "rzg3e"]
+
+[boards.rz-smarc-pi-camera]
+name = "RZ SMARC Pi Camera Adaptor"
+devices = ["rzg3l", "rzg3e"]
+
+[boards.rz-smarc-dsi-hdmi]
+name = "RZ SMARC MIPI DSI-HDMI Adaptor"
+devices = ["rzg3l"]
+
+[[documents]]
+id = "R01UH1153EJ0110"
+title = "RZ/G3L Group, RZ/G3SE Group Hardware Manual (Non-Agreement)"
+doc_type = "hw_manual"
+rev = "1.10"
+path = "docs/devices/rzg3l/r01uh1153ej0110-rzg3l,g3se.pdf"
+pages = 4680
+devices = ["rzg3l", "rzg3se"]
+boards = []
+confidentiality = "public"
+index = ["fulltext", "registers"]
+outline = "bookmarks"
+register_modules = ["5.4", "7.4", "4.4"]   # pilot: WDT (simple), SCIFA (medium), CPG (complex)
+note = "Public edition. Some section numbers are absent (e.g. 3.3, 5.3, 5.6, 6.4, 7.6, 8.2-8.4)."
+
+[[documents]]
+id = "R01DS0469EJ0110"
+title = "RZ/G3L Group, RZ/G3SE Group Datasheet"
+doc_type = "datasheet"
+rev = "1.10"
+path = "docs/devices/rzg3l/r01ds0469ej0110-rzg3l,g3se.pdf"
+pages = 109
+devices = ["rzg3l", "rzg3se"]
+boards = []
+confidentiality = "public"
+index = ["fulltext"]
+outline = "bookmarks"
+
+[[documents]]
+id = "R01AN6110EJ0106"
+title = "RZ/G3L, RZ/G3SE Baking Conditions"
+doc_type = "app_note"
+rev = "1.06"
+path = "docs/devices/rzg3l/r01an6110ej0106_rzg3l_rzg3se_BakingConditions_Rev0106.pdf"
+pages = 6
+devices = ["rzg3l", "rzg3se"]
+boards = []
+confidentiality = "public"
+index = ["fulltext"]
+outline = "none"
+
+[[documents]]
+id = "R01QS0101EJ0101"
+title = "RZ/G3L Evaluation Board Kit - Quick Start Guide"
+doc_type = "quick_start"
+rev = "1.01"
+path = "docs/boards/rzg3l-evk/r01qs0101ej0101-rzg3l.pdf"
+pages = 6
+devices = ["rzg3l"]
+boards = ["rzg3l-evk"]
+confidentiality = "public"
+index = ["fulltext"]
+outline = "bookmarks"
+
+[[documents]]
+id = "R01UH1193EJ0100"
+title = "RZ/G3L SMARC Module Board Evaluation Board Manual"
+doc_type = "board_manual"
+rev = "1.00"
+path = "docs/boards/rzg3l-smarc-module/r01uh1193ej0100-rzg3l-smarc-module-ebm.pdf"
+pages = 70
+devices = ["rzg3l"]
+boards = ["rzg3l-smarc-module", "rzg3l-evk"]
+confidentiality = "public"
+index = ["fulltext"]
+outline = "bookmarks"
+
+[[documents]]
+id = "D020782_04_S01_V0300"
+title = "RZ/G3L SMARC Module Board Schematic"
+doc_type = "schematic"
+rev = "3.00"
+path = "docs/boards/rzg3l-smarc-module/RZG3L_SMARC_Module_Board_Design_Data_V300/D020782_04_S01_V0300-RZG3L_SMARC_MODULE_SCHEM.pdf"
+pages = 26
+devices = ["rzg3l"]
+boards = ["rzg3l-smarc-module"]
+confidentiality = "public"
+index = ["fulltext"]
+outline = "schematic"
+
+[[documents]]
+id = "D020781_02_V0300"
+title = "RZ/G3L SMARC Module Board BOM"
+doc_type = "bom"
+rev = "3.00"
+path = "docs/boards/rzg3l-smarc-module/RZG3L_SMARC_Module_Board_Design_Data_V300/D020781_02_V0300-RZG3L_SMARC_MODULE_BOM.csv"
+pages = 0
+devices = ["rzg3l"]
+boards = ["rzg3l-smarc-module"]
+confidentiality = "public"
+index = ["bom"]
+outline = "none"
+
+[[documents]]
+id = "EPMSM-AB-26-0011-1"
+title = "Errata: RZ/G3L SMARC EVK Current Monitor Offset Caused by Incorrect VBUS Connection"
+doc_type = "errata"
+rev = "1"
+path = "docs/boards/rzg3l-smarc-module/RZG3L_SMARC_Module_Board_Design_Data_V300/EPMSM-AB-26-0011-1_Errata_RZG3L_SMARC_EVK_Current_Monitor_Offset_Caused_by_Incorrect_VBUS_Connection.pdf"
+pages = 5
+devices = ["rzg3l"]
+boards = ["rzg3l-smarc-module", "rzg3l-evk"]
+confidentiality = "public"
+index = ["fulltext"]
+outline = "none"
+
+[[documents]]
+id = "D020362_04_S01_V0300"
+title = "RZ SMARC RGB-HDMI2 Adaptor Schematic"
+doc_type = "schematic"
+rev = "3.00"
+path = "docs/boards/rzg3l-smarc-module/RZG3L_SMARC_Module_Board_Design_Data_V300/RGB_HDMI2/D020362_04_S01_V0300-RZ_SMARC_RGB_HDMI2.pdf"
+pages = 3
+devices = ["rzg3l"]
+boards = ["rz-smarc-rgb-hdmi2"]
+confidentiality = "public"
+index = ["fulltext"]
+outline = "schematic"
+
+[[documents]]
+id = "D020272_04_S01_V0200"
+title = "RZ SMARC Breakout Board Schematic"
+doc_type = "schematic"
+rev = "2.00"
+path = "docs/boards/rzg3l-smarc-module/RZG3L_SMARC_Module_Board_Design_Data_V300/Breakout/D020272_04_S01_V0200-RZ_SMARC_BREAKOUT.pdf"
+pages = 4
+devices = ["rzg3l"]
+boards = ["rz-smarc-breakout"]
+confidentiality = "public"
+index = ["fulltext"]
+outline = "schematic"
+
+[[documents]]
+id = "SLG4E46290_DS"
+title = "GreenPAK SLG4E46290 Datasheet (SMARC module)"
+doc_type = "component_datasheet"
+rev = "r011"
+path = "docs/boards/rzg3l-smarc-module/RZG3L_SMARC_Module_Board_Design_Data_V300/GreenPAK/SLG4E46290_DS_r011_03312023.pdf"
+pages = 10
+devices = ["rzg3l"]
+boards = ["rzg3l-smarc-module"]
+confidentiality = "public"
+index = ["fulltext"]
+outline = "none"
+
+[[documents]]
+id = "SLG7RN47049_DS"
+title = "GreenPAK SLG7RN47049 Datasheet (SMARC module)"
+doc_type = "component_datasheet"
+rev = "r012"
+path = "docs/boards/rzg3l-smarc-module/RZG3L_SMARC_Module_Board_Design_Data_V300/GreenPAK/SLG7RN47049_DS_r012_11272023.pdf"
+pages = 10
+devices = ["rzg3l"]
+boards = ["rzg3l-smarc-module"]
+confidentiality = "public"
+index = ["fulltext"]
+outline = "none"
+
+[[documents]]
+id = "SLG7RN48373_DS"
+title = "GreenPAK SLG7RN48373 Datasheet (SMARC module)"
+doc_type = "component_datasheet"
+rev = "r015"
+path = "docs/boards/rzg3l-smarc-module/RZG3L_SMARC_Module_Board_Design_Data_V300/GreenPAK/SLG7RN48373_DS_r015_10202025.pdf"
+pages = 31
+devices = ["rzg3l"]
+boards = ["rzg3l-smarc-module"]
+confidentiality = "public"
+index = ["fulltext"]
+outline = "none"
+
+[[documents]]
+id = "SLG7RN48374_DS"
+title = "GreenPAK SLG7RN48374 Datasheet (SMARC module)"
+doc_type = "component_datasheet"
+rev = "r010"
+path = "docs/boards/rzg3l-smarc-module/RZG3L_SMARC_Module_Board_Design_Data_V300/GreenPAK/SLG7RN48374_DS_r010_01022025.pdf"
+pages = 10
+devices = ["rzg3l"]
+boards = ["rzg3l-smarc-module"]
+confidentiality = "public"
+index = ["fulltext"]
+outline = "none"
+
+[[documents]]
+id = "R01UH1077EJ0120"
+title = "RZ SMARC Series Carrier Board II Evaluation Board Manual"
+doc_type = "board_manual"
+rev = "1.20"
+path = "docs/boards/rz-smarc-carrier2/r01uh1077ej0120-rz-smarc-carrier2-ebm.pdf"
+pages = 95
+devices = ["rzg3l", "rzg3e", "rzg3s"]
+boards = ["rz-smarc-carrier2", "rzg3l-evk"]
+confidentiality = "public"
+index = ["fulltext"]
+outline = "bookmarks"
+
+[[documents]]
+id = "D019232_04_V0200"
+title = "RZ SMARC Carrier Board II Schematic"
+doc_type = "schematic"
+rev = "2.00"
+path = "docs/boards/rz-smarc-carrier2/RZ_SMARC_Series_Carrier_Board_II_Design_Data_V2.00/D019232_04_V0200-RZ_SMARC_CARRIER_2_SCHEM.pdf"
+pages = 27
+devices = ["rzg3l", "rzg3e", "rzg3s"]
+boards = ["rz-smarc-carrier2"]
+confidentiality = "public"
+index = ["fulltext"]
+outline = "schematic"
+
+[[documents]]
+id = "D020392_04_V0100"
+title = "RZ SMARC Dual LVDS-HDMI Adaptor Schematic"
+doc_type = "schematic"
+rev = "1.00"
+path = "docs/boards/rz-smarc-carrier2/RZ_SMARC_Series_Carrier_Board_II_Design_Data_V2.00/Adaptor_Boards_For_RZG3L/Dual_LVDS-HDMI/D020392_04_V0100_RZ_SMARC_DUAL_LVDS-HDMI_ADAPTOR_SCHEM.pdf"
+pages = 4
+devices = ["rzg3l", "rzg3e"]
+boards = ["rz-smarc-dual-lvds-hdmi"]
+confidentiality = "public"
+index = ["fulltext"]
+outline = "schematic"
+duplicates = ["docs/boards/rz-smarc-carrier2/RZ_SMARC_Series_Carrier_Board_II_Design_Data_V2.00/Adaptor_Boards_For_RZG3E/Dual_LVDS-HDMI/D020392_04_V0100_RZ_SMARC_DUAL_LVDS-HDMI_ADAPTOR_SCHEM.pdf"]
+
+[[documents]]
+id = "D020391_02_V0100"
+title = "RZ SMARC Dual LVDS-HDMI Adaptor BOM"
+doc_type = "bom"
+rev = "1.00"
+path = "docs/boards/rz-smarc-carrier2/RZ_SMARC_Series_Carrier_Board_II_Design_Data_V2.00/Adaptor_Boards_For_RZG3L/Dual_LVDS-HDMI/D020391_02_V0100_RZ_SMARC_DUAL_LVDS-HDMI_ADAPTOR_BOM.csv"
+pages = 0
+devices = ["rzg3l", "rzg3e"]
+boards = ["rz-smarc-dual-lvds-hdmi"]
+confidentiality = "public"
+index = ["bom"]
+outline = "none"
+duplicates = ["docs/boards/rz-smarc-carrier2/RZ_SMARC_Series_Carrier_Board_II_Design_Data_V2.00/Adaptor_Boards_For_RZG3E/Dual_LVDS-HDMI/D020391_02_V0100_RZ_SMARC_DUAL_LVDS-HDMI_ADAPTOR_BOM.csv"]
+
+[[documents]]
+id = "D020672_04_V0100"
+title = "RZ SMARC Pi Camera Adaptor Schematic"
+doc_type = "schematic"
+rev = "1.00"
+path = "docs/boards/rz-smarc-carrier2/RZ_SMARC_Series_Carrier_Board_II_Design_Data_V2.00/Adaptor_Boards_For_RZG3L/Pi_Camera/D020672_04_V0100_RZ_SMARC_Pi_CAMERA_SCHEM.pdf"
+pages = 1
+devices = ["rzg3l", "rzg3e"]
+boards = ["rz-smarc-pi-camera"]
+confidentiality = "public"
+index = ["fulltext"]
+outline = "schematic"
+duplicates = ["docs/boards/rz-smarc-carrier2/RZ_SMARC_Series_Carrier_Board_II_Design_Data_V2.00/Adaptor_Boards_For_RZG3E/Pi_Camera/D020672_04_V0100_RZ_SMARC_Pi_CAMERA_SCHEM.pdf"]
+
+[[documents]]
+id = "D020671_02_V0100"
+title = "RZ SMARC Pi Camera Adaptor BOM"
+doc_type = "bom"
+rev = "1.00"
+path = "docs/boards/rz-smarc-carrier2/RZ_SMARC_Series_Carrier_Board_II_Design_Data_V2.00/Adaptor_Boards_For_RZG3L/Pi_Camera/D020671_02_V0100_RZ_SMARC_Pi_CAMERA_BOM.csv"
+pages = 0
+devices = ["rzg3l", "rzg3e"]
+boards = ["rz-smarc-pi-camera"]
+confidentiality = "public"
+index = ["bom"]
+outline = "none"
+duplicates = ["docs/boards/rz-smarc-carrier2/RZ_SMARC_Series_Carrier_Board_II_Design_Data_V2.00/Adaptor_Boards_For_RZG3E/Pi_Camera/D020671_02_V0100_RZ_SMARC_Pi_CAMERA_BOM.csv"]
+
+[[documents]]
+id = "D019687_04_V0101"
+title = "RZ SMARC MIPI DSI-HDMI Adaptor Schematic"
+doc_type = "schematic"
+rev = "1.01"
+path = "docs/boards/rz-smarc-carrier2/RZ_SMARC_Series_Carrier_Board_II_Design_Data_V2.00/Adaptor_Boards_For_RZG3L/MIPI_DSI-HDMI/D019687_04_V0101_RZ_SMARC_DSI-HDMI_SCHEM.pdf"
+pages = 4
+devices = ["rzg3l"]
+boards = ["rz-smarc-dsi-hdmi"]
+confidentiality = "public"
+index = ["fulltext"]
+outline = "schematic"
+
+[[documents]]
+id = "SLG4AE45948_DS"
+title = "GreenPAK SLG4AE45948 Datasheet (Carrier Board II)"
+doc_type = "component_datasheet"
+rev = "r011"
+path = "docs/boards/rz-smarc-carrier2/RZ_SMARC_Series_Carrier_Board_II_Design_Data_V2.00/GreenPAK/SLG4AE45948_DS_r011_11102022.pdf"
+pages = 14
+devices = ["rzg3l", "rzg3e", "rzg3s"]
+boards = ["rz-smarc-carrier2"]
+confidentiality = "public"
+index = ["fulltext"]
+outline = "none"
+
+[[documents]]
+id = "SLG4AR45947_DS"
+title = "GreenPAK SLG4AR45947 Datasheet (Carrier Board II)"
+doc_type = "component_datasheet"
+rev = "r012"
+path = "docs/boards/rz-smarc-carrier2/RZ_SMARC_Series_Carrier_Board_II_Design_Data_V2.00/GreenPAK/SLG4AR45947_DS_r012_11102022.pdf"
+pages = 13
+devices = ["rzg3l", "rzg3e", "rzg3s"]
+boards = ["rz-smarc-carrier2"]
+confidentiality = "public"
+index = ["fulltext"]
+outline = "none"
+
+[[documents]]
+id = "SLG4L45949_DS"
+title = "GreenPAK SLG4L45949 Datasheet (Carrier Board II)"
+doc_type = "component_datasheet"
+rev = "r011"
+path = "docs/boards/rz-smarc-carrier2/RZ_SMARC_Series_Carrier_Board_II_Design_Data_V2.00/GreenPAK/SLG4L45949_DS_r011_11102022.pdf"
+pages = 13
+devices = ["rzg3l", "rzg3e", "rzg3s"]
+boards = ["rz-smarc-carrier2"]
+confidentiality = "public"
+index = ["fulltext"]
+outline = "none"
+
+[[documents]]
+id = "SLG4R45950_DS"
+title = "GreenPAK SLG4R45950 Datasheet (Carrier Board II)"
+doc_type = "component_datasheet"
+rev = "r010"
+path = "docs/boards/rz-smarc-carrier2/RZ_SMARC_Series_Carrier_Board_II_Design_Data_V2.00/GreenPAK/SLG4R45950_DS_r010_08112022.pdf"
+pages = 10
+devices = ["rzg3l", "rzg3e", "rzg3s"]
+boards = ["rz-smarc-carrier2"]
+confidentiality = "public"
+index = ["fulltext"]
+outline = "none"
+
+[[documents]]
+id = "R01AN7912EJ0107"
+title = "RZ Family DRAM List"
+doc_type = "app_note"
+rev = "1.07"
+path = "docs/family/rz/r01an7912ej0107-rz-family-dram-list.pdf"
+pages = 12
+devices = ["rzg3l", "rzg3s", "rzg3e", "rzg2l", "rzv2l", "rzv2h", "rzv2n"]
+boards = []
+confidentiality = "public"
+index = ["fulltext"]
+outline = "bookmarks"
+note = "Family-wide; per-device rows inside"
+
+[[documents]]
+id = "R01US0468EJ0116"
+title = "RZ Linux Device Driver Software Manual: Kernel Core"
+doc_type = "sw_manual"
+rev = "1.16"
+path = "docs/family/rz/RTK0EF0045Z9006AZJ-v4.0.6/r01us0468ej0116-rz_Kernel_Core.pdf"
+pages = 33
+devices = ["rzfive", "rzg2l", "rzg3e", "rzg3l", "rzg3s", "rzv2h", "rzv2l", "rzv2n"]
+boards = []
+confidentiality = "public"
+index = ["fulltext"]
+outline = "bookmarks"
+note = "Part of package RTK0EF0045Z9006AZJ v4.0.6"
+
+[[documents]]
+id = "R01US0474EJ0116"
+title = "RZ Linux Device Driver Software Manual: SD MMC"
+doc_type = "sw_manual"
+rev = "1.16"
+path = "docs/family/rz/RTK0EF0045Z9006AZJ-v4.0.6/r01us0474ej0116-rz_SD_MMC.pdf"
+pages = 30
+devices = ["rzfive", "rzg2l", "rzg3e", "rzg3l", "rzg3s", "rzv2h", "rzv2l", "rzv2n"]
+boards = []
+confidentiality = "public"
+index = ["fulltext"]
+outline = "bookmarks"
+note = "Part of package RTK0EF0045Z9006AZJ v4.0.6"
+
+[[documents]]
+id = "R01US0475EJ0117"
+title = "RZ Linux Device Driver Software Manual: Gigabit Ethernet"
+doc_type = "sw_manual"
+rev = "1.17"
+path = "docs/family/rz/RTK0EF0045Z9006AZJ-v4.0.6/r01us0475ej0117-rz_Gigabit_Ethernet.pdf"
+pages = 52
+devices = ["rzfive", "rzg2l", "rzg3e", "rzg3l", "rzg3s", "rzv2h", "rzv2l", "rzv2n"]
+boards = []
+confidentiality = "public"
+index = ["fulltext"]
+outline = "bookmarks"
+note = "Part of package RTK0EF0045Z9006AZJ v4.0.6"
+
+[[documents]]
+id = "R01US0476EJ0112"
+title = "RZ Linux Device Driver Software Manual: MTU3a"
+doc_type = "sw_manual"
+rev = "1.12"
+path = "docs/family/rz/RTK0EF0045Z9006AZJ-v4.0.6/r01us0476ej0112-rz_MTU3a.pdf"
+pages = 25
+devices = ["rzfive", "rzg2l", "rzg3l", "rzg3s", "rzv2l"]
+boards = []
+confidentiality = "public"
+index = ["fulltext"]
+outline = "bookmarks"
+note = "Part of package RTK0EF0045Z9006AZJ v4.0.6"
+
+[[documents]]
+id = "R01US0477EJ0117"
+title = "RZ Linux Device Driver Software Manual: I2C"
+doc_type = "sw_manual"
+rev = "1.17"
+path = "docs/family/rz/RTK0EF0045Z9006AZJ-v4.0.6/r01us0477ej0117-rz_I2C.pdf"
+pages = 37
+devices = ["rzfive", "rzg2l", "rzg3e", "rzg3l", "rzg3s", "rzv2h", "rzv2l", "rzv2n"]
+boards = []
+confidentiality = "public"
+index = ["fulltext"]
+outline = "bookmarks"
+note = "Part of package RTK0EF0045Z9006AZJ v4.0.6"
+
+[[documents]]
+id = "R01US0478EJ0115"
+title = "RZ Linux Device Driver Software Manual: CANFD"
+doc_type = "sw_manual"
+rev = "1.15"
+path = "docs/family/rz/RTK0EF0045Z9006AZJ-v4.0.6/r01us0478ej0115-rz_CANFD.pdf"
+pages = 44
+devices = ["rzfive", "rzg2l", "rzg3e", "rzg3l", "rzg3s", "rzv2h", "rzv2l", "rzv2n"]
+boards = []
+confidentiality = "public"
+index = ["fulltext"]
+outline = "bookmarks"
+note = "Part of package RTK0EF0045Z9006AZJ v4.0.6"
+
+[[documents]]
+id = "R01US0479EJ0115"
+title = "RZ Linux Device Driver Software Manual: WDT"
+doc_type = "sw_manual"
+rev = "1.15"
+path = "docs/family/rz/RTK0EF0045Z9006AZJ-v4.0.6/r01us0479ej0115-rz_WDT.pdf"
+pages = 24
+devices = ["rzfive", "rzg2l", "rzg3e", "rzg3l", "rzg3s", "rzv2h", "rzv2l", "rzv2n"]
+boards = []
+confidentiality = "public"
+index = ["fulltext"]
+outline = "bookmarks"
+note = "Part of package RTK0EF0045Z9006AZJ v4.0.6"
+
+[[documents]]
+id = "R01US0480EJ0117"
+title = "RZ Linux Device Driver Software Manual: DMAC"
+doc_type = "sw_manual"
+rev = "1.17"
+path = "docs/family/rz/RTK0EF0045Z9006AZJ-v4.0.6/r01us0480ej0117-rz_DMAC.pdf"
+pages = 26
+devices = ["rzfive", "rzg2l", "rzg3e", "rzg3l", "rzg3s", "rzv2h", "rzv2l", "rzv2n"]
+boards = []
+confidentiality = "public"
+index = ["fulltext"]
+outline = "bookmarks"
+note = "Part of package RTK0EF0045Z9006AZJ v4.0.6"
+
+[[documents]]
+id = "R01US0481EJ0116"
+title = "RZ Linux Device Driver Software Manual: RSPI"
+doc_type = "sw_manual"
+rev = "1.16"
+path = "docs/family/rz/RTK0EF0045Z9006AZJ-v4.0.6/r01us0481ej0116-rz_RSPI.pdf"
+pages = 23
+devices = ["rzfive", "rzg2l", "rzg3e", "rzg3l", "rzg3s", "rzv2h", "rzv2l", "rzv2n"]
+boards = []
+confidentiality = "public"
+index = ["fulltext"]
+outline = "bookmarks"
+note = "Part of package RTK0EF0045Z9006AZJ v4.0.6"
+
+[[documents]]
+id = "R01US0482EJ0112"
+title = "RZ Linux Device Driver Software Manual: SPI Multi IO"
+doc_type = "sw_manual"
+rev = "1.12"
+path = "docs/family/rz/RTK0EF0045Z9006AZJ-v4.0.6/r01us0482ej0112-rz_SPI_Multi_IO.pdf"
+pages = 15
+devices = ["rzfive", "rzg2l", "rzv2l"]
+boards = []
+confidentiality = "public"
+index = ["fulltext"]
+outline = "bookmarks"
+note = "Part of package RTK0EF0045Z9006AZJ v4.0.6"
+
+[[documents]]
+id = "R01US0483EJ0115"
+title = "RZ Linux Device Driver Software Manual: SCIFA"
+doc_type = "sw_manual"
+rev = "1.15"
+path = "docs/family/rz/RTK0EF0045Z9006AZJ-v4.0.6/r01us0483ej0115-rz_SCIFA.pdf"
+pages = 19
+devices = ["rzfive", "rzg2l", "rzg3e", "rzg3l", "rzg3s", "rzv2h", "rzv2l", "rzv2n"]
+boards = []
+confidentiality = "public"
+index = ["fulltext"]
+outline = "bookmarks"
+note = "Part of package RTK0EF0045Z9006AZJ v4.0.6"
+
+[[documents]]
+id = "R01US0484EJ0114"
+title = "RZ Linux Device Driver Software Manual: GPT"
+doc_type = "sw_manual"
+rev = "1.14"
+path = "docs/family/rz/RTK0EF0045Z9006AZJ-v4.0.6/r01us0484ej0114-rz_GPT.pdf"
+pages = 45
+devices = ["rzg2l", "rzg3e", "rzg3l", "rzg3s", "rzv2h", "rzv2l", "rzv2n"]
+boards = []
+confidentiality = "public"
+index = ["fulltext"]
+outline = "bookmarks"
+note = "Part of package RTK0EF0045Z9006AZJ v4.0.6"
+
+[[documents]]
+id = "R01US0485EJ0116"
+title = "RZ Linux Device Driver Software Manual: USB2.0 Host"
+doc_type = "sw_manual"
+rev = "1.16"
+path = "docs/family/rz/RTK0EF0045Z9006AZJ-v4.0.6/r01us0485ej0116-rz_USB2.0_Host.pdf"
+pages = 34
+devices = ["rzfive", "rzg2l", "rzg3e", "rzg3l", "rzg3s", "rzv2h", "rzv2l", "rzv2n"]
+boards = []
+confidentiality = "public"
+index = ["fulltext"]
+outline = "bookmarks"
+note = "Part of package RTK0EF0045Z9006AZJ v4.0.6"
+
+[[documents]]
+id = "R01US0486EJ0115"
+title = "RZ Linux Device Driver Software Manual: Thermal Sensor"
+doc_type = "sw_manual"
+rev = "1.15"
+path = "docs/family/rz/RTK0EF0045Z9006AZJ-v4.0.6/r01us0486ej0115-rz_Thermal_Sensor.pdf"
+pages = 28
+devices = ["rzfive", "rzg2l", "rzg3e", "rzg3l", "rzg3s", "rzv2h", "rzv2l", "rzv2n"]
+boards = []
+confidentiality = "public"
+index = ["fulltext"]
+outline = "bookmarks"
+note = "Part of package RTK0EF0045Z9006AZJ v4.0.6"
+
+[[documents]]
+id = "R01US0487EJ0115"
+title = "RZ Linux Device Driver Software Manual: AD Converter"
+doc_type = "sw_manual"
+rev = "1.15"
+path = "docs/family/rz/RTK0EF0045Z9006AZJ-v4.0.6/r01us0487ej0115-rz_AD_Converter.pdf"
+pages = 24
+devices = ["rzfive", "rzg2l", "rzg3e", "rzg3l", "rzg3s", "rzv2h", "rzv2l", "rzv2n"]
+boards = []
+confidentiality = "public"
+index = ["fulltext"]
+outline = "bookmarks"
+note = "Part of package RTK0EF0045Z9006AZJ v4.0.6"
+
+[[documents]]
+id = "R01US0488EJ0116"
+title = "RZ Linux Device Driver Software Manual: GPIO"
+doc_type = "sw_manual"
+rev = "1.16"
+path = "docs/family/rz/RTK0EF0045Z9006AZJ-v4.0.6/r01us0488ej0116-rz_GPIO.pdf"
+pages = 26
+devices = ["rzfive", "rzg2l", "rzg3e", "rzg3l", "rzg3s", "rzv2h", "rzv2l", "rzv2n"]
+boards = []
+confidentiality = "public"
+index = ["fulltext"]
+outline = "bookmarks"
+note = "Part of package RTK0EF0045Z9006AZJ v4.0.6"
+
+[[documents]]
+id = "R01US0489EJ0116"
+title = "RZ Linux Device Driver Software Manual: LCDC"
+doc_type = "sw_manual"
+rev = "1.16"
+path = "docs/family/rz/RTK0EF0045Z9006AZJ-v4.0.6/r01us0489ej0116-rz_LCDC.pdf"
+pages = 44
+devices = ["rzg2l", "rzg3e", "rzg3l", "rzv2h", "rzv2l", "rzv2n"]
+boards = []
+confidentiality = "public"
+index = ["fulltext"]
+outline = "bookmarks"
+note = "Part of package RTK0EF0045Z9006AZJ v4.0.6"
+
+[[documents]]
+id = "R01US0490EJ0118"
+title = "RZ Linux Device Driver Software Manual: Audio"
+doc_type = "sw_manual"
+rev = "1.18"
+path = "docs/family/rz/RTK0EF0045Z9006AZJ-v4.0.6/r01us0490ej0118-rz_Audio.pdf"
+pages = 100
+devices = ["rzfive", "rzg2l", "rzg3e", "rzg3l", "rzg3s", "rzv2h", "rzv2l", "rzv2n"]
+boards = []
+confidentiality = "public"
+index = ["fulltext"]
+outline = "bookmarks"
+note = "Part of package RTK0EF0045Z9006AZJ v4.0.6"
+
+[[documents]]
+id = "R01US0491EJ0117"
+title = "RZ Linux Device Driver Software Manual: USB2.0 Function"
+doc_type = "sw_manual"
+rev = "1.17"
+path = "docs/family/rz/RTK0EF0045Z9006AZJ-v4.0.6/r01us0491ej0117-rz_USB2.0_Function.pdf"
+pages = 27
+devices = ["rzfive", "rzg2l", "rzg3e", "rzg3l", "rzg3s", "rzv2h", "rzv2l", "rzv2n"]
+boards = []
+confidentiality = "public"
+index = ["fulltext"]
+outline = "bookmarks"
+note = "Part of package RTK0EF0045Z9006AZJ v4.0.6"
+
+[[documents]]
+id = "R01US0499EJ0116"
+title = "RZ Linux Device Driver Software Manual: CRU"
+doc_type = "sw_manual"
+rev = "1.16"
+path = "docs/family/rz/RTK0EF0045Z9006AZJ-v4.0.6/r01us0499ej0116-rz_CRU.pdf"
+pages = 26
+devices = ["rzg2l", "rzg3e", "rzg3l", "rzv2h", "rzv2l", "rzv2n"]
+boards = []
+confidentiality = "public"
+index = ["fulltext"]
+outline = "bookmarks"
+note = "Part of package RTK0EF0045Z9006AZJ v4.0.6"
+
+[[documents]]
+id = "R01US0552EJ0111"
+title = "RZ Linux Device Driver Software Manual: POE3"
+doc_type = "sw_manual"
+rev = "1.11"
+path = "docs/family/rz/RTK0EF0045Z9006AZJ-v4.0.6/r01us0552ej0111-rz_POE3.pdf"
+pages = 20
+devices = ["rzfive", "rzg2l", "rzg3l", "rzg3s", "rzv2l"]
+boards = []
+confidentiality = "public"
+index = ["fulltext"]
+outline = "bookmarks"
+note = "Part of package RTK0EF0045Z9006AZJ v4.0.6"
+
+[[documents]]
+id = "R01US0605EJ0115"
+title = "RZ Linux Device Driver Software Manual: Power Management"
+doc_type = "sw_manual"
+rev = "1.15"
+path = "docs/family/rz/RTK0EF0045Z9006AZJ-v4.0.6/r01us0605ej0115-rz_Power_Management.pdf"
+pages = 42
+devices = ["rzfive", "rzg2l", "rzg3e", "rzg3l", "rzg3s", "rzv2h", "rzv2l", "rzv2n"]
+boards = []
+confidentiality = "public"
+index = ["fulltext"]
+outline = "bookmarks"
+note = "Part of package RTK0EF0045Z9006AZJ v4.0.6"
+
+[[documents]]
+id = "R01US0647EJ0104"
+title = "RZ Linux Device Driver Software Manual: ECC"
+doc_type = "sw_manual"
+rev = "1.04"
+path = "docs/family/rz/RTK0EF0045Z9006AZJ-v4.0.6/r01us0647ej0104-rz_ECC.pdf"
+pages = 24
+devices = ["rzfive", "rzg2l", "rzv2l"]
+boards = []
+confidentiality = "public"
+index = ["fulltext"]
+outline = "bookmarks"
+note = "Part of package RTK0EF0045Z9006AZJ v4.0.6"
+
+[[documents]]
+id = "R01US0691EJ0105"
+title = "RZ Linux Device Driver Software Manual: I3C"
+doc_type = "sw_manual"
+rev = "1.05"
+path = "docs/family/rz/RTK0EF0045Z9006AZJ-v4.0.6/r01us0691ej0105-rz_I3C.pdf"
+pages = 33
+devices = ["rzg3e", "rzg3l", "rzg3s", "rzv2h", "rzv2n"]
+boards = []
+confidentiality = "public"
+index = ["fulltext"]
+outline = "bookmarks"
+note = "Part of package RTK0EF0045Z9006AZJ v4.0.6"
+
+[[documents]]
+id = "R01US0693EJ0105"
+title = "RZ Linux Device Driver Software Manual: xSPI"
+doc_type = "sw_manual"
+rev = "1.05"
+path = "docs/family/rz/RTK0EF0045Z9006AZJ-v4.0.6/r01us0693ej0105-rz_xSPI.pdf"
+pages = 22
+devices = ["rzg3e", "rzg3l", "rzg3s", "rzv2h", "rzv2n"]
+boards = []
+confidentiality = "public"
+index = ["fulltext"]
+outline = "bookmarks"
+note = "Part of package RTK0EF0045Z9006AZJ v4.0.6"
+
+[[documents]]
+id = "R01US0700EJ0105"
+title = "RZ Linux Device Driver Software Manual: OSTM"
+doc_type = "sw_manual"
+rev = "1.05"
+path = "docs/family/rz/RTK0EF0045Z9006AZJ-v4.0.6/r01us0700ej0105-rz_OSTM.pdf"
+pages = 25
+devices = ["rzfive", "rzg2l", "rzg3e", "rzg3l", "rzg3s", "rzv2h", "rzv2l", "rzv2n"]
+boards = []
+confidentiality = "public"
+index = ["fulltext"]
+outline = "bookmarks"
+note = "Part of package RTK0EF0045Z9006AZJ v4.0.6"
+
+[[documents]]
+id = "R01US0701EJ0105"
+title = "RZ Linux Device Driver Software Manual: RTC"
+doc_type = "sw_manual"
+rev = "1.05"
+path = "docs/family/rz/RTK0EF0045Z9006AZJ-v4.0.6/r01us0701ej0105-rz_RTC.pdf"
+pages = 14
+devices = ["rzg3e", "rzg3l", "rzg3s", "rzv2h", "rzv2n"]
+boards = []
+confidentiality = "public"
+index = ["fulltext"]
+outline = "bookmarks"
+note = "Part of package RTK0EF0045Z9006AZJ v4.0.6"
+
+[[documents]]
+id = "R01US0702EJ0104"
+title = "RZ Linux Device Driver Software Manual: USB3"
+doc_type = "sw_manual"
+rev = "1.04"
+path = "docs/family/rz/RTK0EF0045Z9006AZJ-v4.0.6/r01us0702ej0104-rz_USB3.pdf"
+pages = 20
+devices = ["rzg3e", "rzv2h", "rzv2n"]
+boards = []
+confidentiality = "public"
+index = ["fulltext"]
+outline = "bookmarks"
+note = "Part of package RTK0EF0045Z9006AZJ v4.0.6"
+
+[[documents]]
+id = "R01US0729EJ0105"
+title = "RZ Linux Device Driver Software Manual: PCIe"
+doc_type = "sw_manual"
+rev = "1.05"
+path = "docs/family/rz/RTK0EF0045Z9006AZJ-v4.0.6/r01us0729ej0105-rz_PCIe.pdf"
+pages = 39
+devices = ["rzg3e", "rzg3l", "rzg3s", "rzv2h", "rzv2n"]
+boards = []
+confidentiality = "public"
+index = ["fulltext"]
+outline = "bookmarks"
+note = "Part of package RTK0EF0045Z9006AZJ v4.0.6"
+
+[[documents]]
+id = "R01US0808EJ0103"
+title = "RZ Linux Device Driver Software Manual: RSCI"
+doc_type = "sw_manual"
+rev = "1.03"
+path = "docs/family/rz/RTK0EF0045Z9006AZJ-v4.0.6/r01us0808ej0103-rz_RSCI.pdf"
+pages = 40
+devices = ["rzg3e", "rzg3l", "rzv2h", "rzv2n"]
+boards = []
+confidentiality = "public"
+index = ["fulltext"]
+outline = "bookmarks"
+note = "Part of package RTK0EF0045Z9006AZJ v4.0.6"
+
+# ---- Non-indexed assets (kept on disk, listed so nothing is "unknown") ----
+[[assets]]
+path = "docs/boards/rzg3l-smarc-module/RZG3L_SMARC_Module_Board_Design_Data_V300"
+kinds = ["gerber", "brd", "orcad_dsn", "greenpak_project", "xlsx_bom"]
+board = "rzg3l-smarc-module"
+note = "CAD/fabrication data; xlsx BOMs (Breakout, RGB_HDMI2) not imported yet"
+
+[[assets]]
+path = "docs/boards/rz-smarc-carrier2/RZ_SMARC_Series_Carrier_Board_II_Design_Data_V2.00"
+kinds = ["gerber", "brd", "orcad_dsn", "greenpak_project", "xlsx_bom"]
+board = "rz-smarc-carrier2"
+note = "Carrier BOM is xlsx (not imported yet). Adaptor_Boards_For_RZG3E/* are byte-identical copies of the RZG3L ones."
+
+[[assets]]
+path = "plan"
+kinds = ["project_plan"]
+note = "Project planning documents, not product documentation"
+

@@ -1,0 +1,8 @@
+# Environment and build output
+.venv/
+__pycache__/
+*.pyc
+# Generated (rebuild with `python -m rzmcp.build`); data/.token is a secret
+data/
+# Raw vendor documents (872 MB, read-only, tracked by catalog/manifest.toml instead)
+docs/

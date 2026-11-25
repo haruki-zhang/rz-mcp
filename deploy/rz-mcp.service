@@ -1,0 +1,36 @@
+# systemd *user* unit for the rz-docs MCP server (localhost only, Streamable HTTP, bearer token in data/.token).
+# Bound to 127.0.0.1 because the company MCP allowlist only permits localhost URLs; clients on this PC
+# (incl. VS Code Remote-SSH windows, where Claude Code runs here) use http://localhost:8765/mcp.
+#
+# Install / enable (no sudo):
+#   mkdir -p ~/.config/systemd/user && cp deploy/rz-mcp.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now rz-mcp
+# Remove the resident state again:
+#   systemctl --user disable --now rz-mcp
+# After editing this file, copy it again and run `systemctl --user daemon-reload`.
+#
+# Without `loginctl enable-linger`, the service runs while you are logged in and stops when your last
+# session ends.
+
+[Unit]
+Description=rz-docs MCP server (RZ documentation, localhost)
+Documentation=file:///home/mpu-epmaj/max/workspace/rz-mcp/README.md
+
+[Service]
+Type=exec
+WorkingDirectory=/home/mpu-epmaj/max/workspace/rz-mcp
+ExecStart=/home/mpu-epmaj/max/workspace/rz-mcp/.venv/bin/python -m rzmcp.server --transport http --host 127.0.0.1 --port 8765
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+RestartSec=5
+
+# Yield to heavy jobs (Yocto builds) on this PC. Measured footprint: ~80 MB RSS, ~0% CPU when idle.
+Nice=10
+CPUWeight=20
+MemoryHigh=256M
+MemoryMax=512M
+TasksMax=64
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target

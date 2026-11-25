@@ -1,0 +1,496 @@
+# RZ/G3L documentation MCP server - smoke test question set (ground truth)
+#
+# Every answer / key_fact was copied from the cited PDF pages (pdftotext -layout),
+# not from memory.
+#
+# Conventions
+# - pages: 1-based PDF page index. For every document used here this equals the
+#   printed page number, EXCEPT R01US0479EJ0115 (Linux WDT driver manual), where
+#   printed page = PDF page - 6 (PDF p.7 is printed "Page 1 of 16").
+# - key_facts: short strings that appear verbatim on the cited pages. The PDFs
+#   print hex prefixes with a typographic apostrophe (H’xxxx, U+2019); key_facts
+#   use ASCII H'xxxx, so graders should normalise ’ -> ' (and collapse
+#   whitespace) before matching.
+# - derived_facts (optional): values computed from printed facts (e.g. absolute
+#   address = base + offset). They are NOT printed verbatim in the manual but are
+#   what a correct answer should state.
+# - For negative questions, key_facts are phrases from the documents that a
+#   correct "not in the provided documents" answer should cite.
+
+# ---------------------------------------------------------------------------
+# Register questions - pilot modules (WDT 5.4, SCIFA 7.4, CPG 4.4)
+# ---------------------------------------------------------------------------
+
+[[q]]
+id = "REG-01"
+type = "register_lookup"
+question = "What is the absolute address and reset value of WDTSET for the Cortex-M33 watchdog (WDT CH2) when the Cortex-M33 accesses it through its Secure address space? What address would the Cortex-A55 use for the same register?"
+answer = "WDT CH2 is the WDT that checks the Cortex-M33. Its base address is H'4280_0000 in the Cortex-M33 Secure address space (H'5280_0000 in Cortex-M33 Non-Secure, H'0_1280_0000 in the Cortex-A55 address space). WDTSET_2 is at offset H'0004, so the address is H'4280_0004 (CM33 Secure) and H'0_1280_0004 (CA55). WDTSET_2 is R/W, 32-bit access, initial value H'FFF0_0000."
+key_facts = ["H'4280_0000", "H'0_1280_0000", "H'0004", "H'FFF0_0000", "WDTSET_2"]
+derived_facts = ["H'4280_0004", "H'0_1280_0004"]
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [1189, 1190]
+section = "5.4.2"
+
+[[q]]
+id = "REG-02"
+type = "bitfield"
+question = "WDTSET 寄存器里设置看门狗超时周期的是哪几位？可设置的范围是多少？WDTn_CLK = 24 MHz 时，复位值对应的超时时间是多少？"
+answer = "The period field is WDTTIME[11:0] = WDTSET[31:20] (bits 19 to 0 are reserved, read as 0). Settable values: H'000 to H'FFF. Watchdog timer cycle = WDTn_CLK cycle × 1024 × 1024 × (WDTTIME + 1); with WDTn_CLK = 24 MHz the cycle is set in 43.69 msec units from 43.69 msec to 178956.97 msec. The reset value of WDTTIME is all 1 (H'FFF, WDTSET = H'FFF0_0000), which is the maximum, 178956.97 msec. WDTTIME cannot be written while the watchdog timer is running. Caution: the value compared when the interrupt occurs is WDTSET[31:0] + H'000F_FFFF."
+key_facts = ["WDTSET[31:20]", "H'000", "H'FFF", "43.69", "178956.97", "H'000F_FFFF"]
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [1192]
+section = "5.4.3.2"
+
+[[q]]
+id = "REG-03"
+type = "bitfield"
+question = "How does software service (kick) the RZ/G3L watchdog so that it does not reset the system, and is there a timing constraint on consecutive writes?"
+answer = "Write 1 to INTDISP (bit 0) of WDTINT_n (offset H'000C, R/W, 32-bit, initial H'0000_0000) within the time set by WDTSET. WDTINT reads the interrupt status (INTDISP read: 1 = with interrupt, 0 = without), clears the interrupt (write 1; write 0 = no change) and clears the WDT counter. If INTDISP is not set to 1 within the WDTSET period, the WDTINT pin (interrupt) is asserted; if it is still not set within the next WDTSET period, the WDTRSTB reset request is asserted. For consecutive writes to WDTINT, leave an interval of 5 × P0ϕ + 5 × OSCCLK or more, otherwise the register is not written. WDTRSTB and WDTINT cannot be masked."
+key_facts = ["WDTINT", "INTDISP", "H'000C", "WDTRSTB"]
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [1190]
+section = "5.4.2"
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [1194]
+section = "5.4.3.4"
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [1212]
+section = "5.4.6"
+
+[[q]]
+id = "REG-04"
+type = "register_lookup"
+question = "I'm writing a polled early-boot UART driver for SCIF ch0 on the Cortex-A55. What are the addresses and access sizes of FTDR and FSR, and what is the reset value of FSR?"
+answer = "SCIFA channel 0 base (Cortex-A55 address space) is H'0_100A_C000 (H'400A_C000 CM33 Secure, H'500A_C000 CM33 Non-Secure). FTDR: offset H'06, write-only, 8-bit, initial value undefined -> H'0_100A_C006. FSR: offset H'08, R/W, 16-bit, initial value H'0020 -> H'0_100A_C008. H'0020 means TDFE (bit 5) = 1, i.e. the transmit FIFO holds no more data than the transmit trigger number."
+key_facts = ["H'0_100A_C000", "H'06", "H'08", "H'0020", "TDFE"]
+derived_facts = ["H'0_100A_C006", "H'0_100A_C008"]
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [2665]
+section = "7.4.2"
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [2672]
+section = "7.4.2.7"
+
+[[q]]
+id = "REG-05"
+type = "bitfield"
+question = "What are the clock source options of SCIFA SMR.CKS[1:0]? Can I select P0ϕ/16 on SCIF channel 0?"
+answer = "CKS[1:0] are SMR bits b1-b0 (SMR: offset H'00, 16-bit, initial H'0000) and select the baud rate generator clock: 00 = 1 × P0ϕ (n = 0), 01 = 1/4 × P0ϕ (n = 1), 10 = 1/16 × P0ϕ (n = 2), 11 = 1/64 × P0ϕ (n = 3), where P0ϕ is SCIFn_CLK_PCK (n = 0 to 5). The 1/16 setting is not applicable to channel 0; it is only applicable to channels 1 to 5 (the P0ϕ/16 clock is not input to the channel 0 interface). So no: on SCIF0 use CKS = 00, 01 or 11."
+key_facts = ["CKS[1:0]", "1/16", "1/64", "SCIFn_CLK_PCK", "channels 1 to 5"]
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [2664]
+section = "7.4.1"
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [2668]
+section = "7.4.2.5"
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [2677]
+section = "7.4.2.8"
+
+[[q]]
+id = "REG-06"
+type = "bitfield"
+question = "Where is the SCIFA FIFO control register, and how do I set the receive FIFO trigger to 8 bytes in asynchronous mode?"
+answer = "FCR: offset H'0C, R/W, 16-bit, initial H'0000. The receive trigger is RTRG[1:0] (bits b7-b6). Asynchronous mode: 00 = 1, 01 = 4, 10 = 8, 11 = 14 (clock synchronous mode: 00 = 1, 01 = 2, 10 = 8, 11 = 14). So set RTRG[1:0] = 10b for 8. RTRG is only valid when the RTRGS bit in FTCR is 0; when RTRGS = 1 the FTCR.RFTC[4:0] setting is used instead. RDF is set and an RXI request is generated when the number of receive FIFO entries rises to or above the trigger number."
+key_facts = ["H'0C", "RTRG[1:0]", "RTRGS", "RFTC[4:0]"]
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [2665]
+section = "7.4.2"
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [2684, 2685]
+section = "7.4.2.10"
+
+[[q]]
+id = "REG-07"
+type = "register_lookup"
+question = "After the board comes back from a watchdog reset, how can firmware tell which WDT channel caused the system reset? Give the register and its Cortex-A55 address."
+answer = "Read CPG_WDTOVF_RST at <CPG_base> + 0B10h. CPG_base = 0_1101_0000h (Cortex-A55; 5101_0000h CM33 Non-Secure, 4101_0000h CM33 Secure), so the CA55 address is 0_1101_0B10h. 32-bit, initial 0000_0000h. WDTOVF0 (bit 0) = 1: system reset generated by WDT channel 0 (Cortex-A55 Non-Secure); WDTOVF1 (bit 1): channel 1 (Cortex-A55 Secure); WDTOVF2 (bit 2): channel 2 (Cortex-M33). The bits are cleared by writing 1, together with the write-enable bits WDTOVF0_WEN/WDTOVF1_WEN/WDTOVF2_WEN (bits 16/17/18). If no system reset was applied (masked by the WDTRSTSEL register), the source must be identified from the WDT interrupt and status register instead."
+key_facts = ["CPG_WDTOVF_RST", "0B10h", "0_1101_0000h", "WDTOVF0", "WDTOVF2"]
+derived_facts = ["0_1101_0B10h"]
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [400]
+section = "4.4.3"
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [714]
+section = "4.4.3.263"
+
+[[q]]
+id = "REG-08"
+type = "bitfield"
+question = "如何把 SDHI0 的时钟分频设为 1/2？CPG_SDHI_DDIV 的地址、复位值和相关位是什么？"
+answer = "CPG_SDHI_DDIV is at <CPG_base> + 0218h, 32-bit, initial value 0000_0222h. DIVSDHI0_SET[1:0] (bits 1-0) sets the DIV_SDHI0 ratio: 00b = 1/1, 01b = 1/2, 10b = 1/4, other = setting prohibited; initial 2h (1/4). (DIVSDHI1_SET = bits 5-4, DIVSDHI2_SET = bits 9-8.) Write DIVSDHI0_SET = 01b with its write-enable DIVSDHI0_WEN (bit 16) = 1 in the same write (bits 20/24 are the WEN bits for SDHI1/SDHI2). The setting can be changed dynamically while the clock is operating; the 1/1 setting is prohibited if 800 MHz is selected in CPG_SDHI_DSEL. Source clock is the SEL_SDHIn output."
+key_facts = ["CPG_SDHI_DDIV", "0218h", "0000_0222h", "DIVSDHI0_SET", "DIVSDHI0_WEN", "800 MHz"]
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [400]
+section = "4.4.3"
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [423, 424]
+section = "4.4.3.9"
+
+# ---------------------------------------------------------------------------
+# Register questions - non-pilot modules (fallback path)
+# ---------------------------------------------------------------------------
+
+[[q]]
+id = "REG-09"
+type = "register_lookup"
+question = "What is the Cortex-A55 address of GTCCRD for GPT channel 3 (GPT32E3), and what are its reset value and access size?"
+answer = "GPT base address is H'0_1004_8000 (Cortex-A55; H'4004_8000 CM33 Secure, H'5004_8000 CM33 Non-Secure) and channels are spaced H'0100 × m (m = 0 to 7). GTCCRD offset = H'5C + H'0100 × m (address H'1004_805C + H'0100 × m), so for m = 3 the CA55 address is H'0_1004_835C. Reset value H'FFFF_FFFF, 32-bit access. Note the map is not alphabetical: GTCCRE is at H'58 and GTCCRD at H'5C."
+key_facts = ["H'0_1004_8000", "H'5C", "H'1004_805C", "H'FFFF_FFFF", "GTCCRE"]
+derived_facts = ["H'0_1004_835C"]
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [1234]
+section = "5.7.2"
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [1291]
+section = "5.7.2.20"
+
+[[q]]
+id = "REG-10"
+type = "register_lookup"
+question = "RIIC3 的 ICBRL（I2C bus bit rate low-level register）在 Cortex-A55 地址空间的地址、访问宽度和初始值是多少？"
+answer = "<RIIC3_base> = H'0_1009_0C00 (Cortex-A55; H'4009_0C00 CM33 Secure, H'5009_0C00 CM33 Non-Secure). ICBRL (described as RIICnBRL) is at offset H'10, 8-bit access, so the address is H'0_1009_0C10. Initial value H'FF (initialized by any reset): bits 7-5 reserved (read as 1, write 1), BRL[4:0] (bits 4-0, initial H'1F) = low-level period of SCL, counted with the internal reference clock IICϕ selected by RIICnMR1.CKS[2:0]. (RIIC0 is in a different block, H'0_100A_E000.)"
+key_facts = ["H'0_1009_0C00", "H'10", "BRL[4:0]", "H'1F"]
+derived_facts = ["H'0_1009_0C10"]
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [2855]
+section = "7.7.1.2"
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [2861]
+section = "7.7.3"
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [2890]
+section = "7.7.3.13"
+
+# ---------------------------------------------------------------------------
+# Section locate / cross-section
+# ---------------------------------------------------------------------------
+
+[[q]]
+id = "SEC-01"
+type = "section_locate"
+question = "Where does the RZ/G3L hardware manual describe the boot mode pin settings, and which pins select the boot CPU and the boot device?"
+answer = "Section 1.9 Boot Operation, 1.9.1 CPU (CA55 or CM33) Normal Execution Mode (p.147). Table 1.9-1 Boot CPU Selection Pin: BOOT_CPU_SELECT 0 = CM33 cold boot, 1 = CA55 cold boot. Table 1.9-2 Boot Device Selection Pins (BOOT_MODE2/BOOT_MODE1/BOOT_MODE0): 000 boot mode 0 eSD (SD/eMMC ch0); 001 boot mode 1 eMMC 3.3 V; 010 boot mode 2 serial flash (xSPI) 3.3 V; 011 boot mode 3 SCIF download (SCIF ch0); 100 not assigned; 101 boot mode 5 eMMC 1.8 V; 110 boot mode 6 serial flash 1.8 V. eSD/eMMC are CA55-boot only; serial flash and SCIF download work for CA55 and CM33 boot. Per-mode details: 1.9.1.1.1 to 1.9.1.1.4 (pp.148-159); loader allocation: 1.9.1.2 (pp.160-168). Related: 4.4.1.6 Table 4.4-2 (p.398) - do not change BOOT_MODE pins while SYS_RST# is asserted and until the mode is confirmed; SYS_LSI_MODE (4.3.3.2.58, p.360) captures BOOT_MODE[2:0] (bits 6-4) and BOOT_CPU_SELECT (bit 0) at the rising edge of SYS_RST#."
+key_facts = ["1.9.1", "Table 1.9-2", "BOOT_CPU_SELECT", "BOOT_MODE0", "SYS_LSI_MODE"]
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [147, 148]
+section = "1.9.1"
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [360]
+section = "4.3.3.2.58"
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [398]
+section = "4.4.1.6"
+
+[[q]]
+id = "SEC-02"
+type = "cross_section"
+question = "I want to use SCIF ch5 from Linux on the Cortex-A55. Which CPG registers and bits do I need to set to supply its clock, bring it out of module standby, and release its reset?"
+answer = "Procedure (4.4.6.3 + 4.5.3.2.1): start the clock, confirm it, release module stop, release reset, confirm reset release. (1) Clock: CPG_CLKON_SCIF (<CPG_base> + 0584h, initial 0000_0000h): CLK5_ON (bit 5) = 1 with CLK5_ONWEN (bit 21) = 1 supplies SCIF5_CLK_PCK; confirm with CPG_CLKMON_SCIF (<CPG_base> + 0704h) CLK5_MON. (2) Module standby: for SCIF ch5 the MSTOP bit is in CPG_BUS_MCPU3_MSTOP (<CPG_base> + 0B90h) bit 4, MSTOP4_ON (BUS_PERI_HPB0_MSTOP_MHSCIF_5); 0 = normal operation, 1 = module stop state. The register's initial value is 0000_0000h, so this only needs writing (0, with MSTOP4_ON_WEN (bit 20) = 1) if the module was previously put into module standby. When exiting module standby set the clock bit to 1 first, then the MSTOP bit to 0. (SCIF ch0-ch4 instead use CPG_BUS_MCPU2_MSTOP bits 1-5.) (3) Reset: CPG_RST_SCIF (<CPG_base> + 0884h) UNIT5_RSTB (bit 5) = 1 with UNIT5_RST_WEN (bit 21) = 1 releases SCIF5_RST_SYSTEM_N; confirm with CPG_RSTMON_SCIF (<CPG_base> + 0A04h) RST5_MON. CPG_base = 0_1101_0000h on the Cortex-A55."
+key_facts = ["CPG_CLKON_SCIF", "0584h", "CLK5_ON", "CPG_BUS_MCPU3_MSTOP", "0B90h", "MSTOP4_ON", "CPG_RST_SCIF", "0884h", "UNIT5_RSTB"]
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [808, 809]
+section = "4.4.6.3"
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [829, 830]
+section = "4.5.3.2.1"
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [493]
+section = "4.4.3.61"
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [749, 750]
+section = "4.4.3.286"
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [622]
+section = "4.4.3.176"
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [2724]
+section = "7.4.8.9"
+
+[[q]]
+id = "SEC-03"
+type = "cross_section"
+question = "Does a WDT CH0 overflow reset the whole RZ/G3L by default? If not, what must be configured so that a WDT CH0 (Cortex-A55 Non-Secure) overflow causes a system reset and also asserts the WDTOVF_PERROUT# pin?"
+answer = "No. Routing of WDT reset requests is done by the CPG register CPG_WDTRST_SEL (<CPG_base> + 0B14h, 32-bit, initial 0000_0088h - only reserved bits 3 and 7 read 1; all WDTRSTSELn bits are 0 = masked after reset). Set WDTRSTSEL0 (bit 0) = 1 to apply a system reset on a CH0 request and WDTRSTSEL4 (bit 4) = 1 to assert WDTOVF_PERROUT#, with the write-enable bits WDTRSTSEL0_WEN (bit 16) and WDTRSTSEL4_WEN (bit 20) set to 1 in the same write. Bits 8-10 (WDTRSTSEL8/9/10) instead select only a Cortex-A55/Cortex-M33 cold reset. The WDT chapter says to set CPG_WDTRST_SEL[4] only when CPG_WDTRST_SEL[0] = 1; otherwise WDTOVF_PERROUT# is asserted without a system reset. On a WDT system reset, WDTOVF_PERROUT outputs a low pulse for 64 cycles of the 24-MHz clock; afterwards CPG_WDTOVF_RST identifies the channel."
+key_facts = ["CPG_WDTRST_SEL", "0B14h", "0000_0088h", "WDTRSTSEL0", "WDTRSTSEL4"]
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [1210, 1211]
+section = "5.4.5.1"
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [715, 716]
+section = "4.4.3.264"
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [792, 793]
+section = "4.4.5.4"
+
+[[q]]
+id = "SEC-04"
+type = "cross_section"
+question = "The WDT chapter says that once WDTCNT.WDTEN is set the watchdog cannot be stopped until reset. Is there any way to pause WDT CH0 counting, for example while the CPU is halted in a JTAG debugger?"
+answer = "WDT side (5.4.3.1): WDTEN (WDTCNT bit 0) - once enabled the WDT does not stop until reset; for debugging the internal counter can be paused with the CNTSTOP signal. The control is in SYSC (4.3.4.2 WDT Stop Control Function): SYS_WDT0_CTRL at SYSC base H'0_1102_0000 + H'0250 (32-bit, initial H'0000_0000; SYS_WDT1_CTRL = H'0260, SYS_WDT2_CTRL = H'0270). WDTSTOP (bit 0): 1 = stop counting and hold the counter value, 0 = continue counting. WDTSTOPMASK (bit 16): 0 = WDT0 counting stops during debugging (CoreSight WDT stop signal; default), 1 = WDT0 keeps counting during debugging."
+key_facts = ["CNTSTOP", "SYS_WDT0_CTRL", "H'0_1102_0000", "H'0250", "WDTSTOP", "WDTSTOPMASK"]
+derived_facts = ["H'0_1102_0250"]
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [1191]
+section = "5.4.3.1"
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [308]
+section = "4.3.3.1"
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [341]
+section = "4.3.3.2.28"
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [393]
+section = "4.3.4.2"
+
+# ---------------------------------------------------------------------------
+# Board questions
+# ---------------------------------------------------------------------------
+
+[[q]]
+id = "BRD-01"
+type = "board"
+question = "On the RZ/G3L SMARC EVK (RZ/G3L SMARC module on the RZ SMARC Carrier Board II), how do I set the DIP switches to boot from the on-module eMMC?"
+answer = "Carrier II SW_MODE (Table 2.12): boot mode #6 'Module eMMC flash' = SW_MODE[1] (BOOT_SEL0#) ON, SW_MODE[2] (BOOT_SEL1#) OFF, SW_MODE[3] (BOOT_SEL2#) OFF. SW_MODE[4] is not used for mode selection (it selects the minimum USB-C input current). On the module: SYS[1] (SW_SD0_DEV_SEL) OFF = SD0 connected to eMMC (ON = microSD0 card); BOOT[2] (RZ_BOOT_CPU_SELECT) OFF = cold boot from Cortex-A55 (eMMC boot is CA55-only). The module GreenPAK SLG7RN47049 decodes the SMARC BOOT_SEL[2:0]# signals into the RZ/G3L MD_BOOT pins; its only eMMC setting is MD_BOOT 1 0 1 = eMMC (1.8-V)."
+key_facts = ["SW_MODE[1]", "SW_MODE[2]", "SW_MODE[3]", "Module eMMC flash", "SW_SD0_DEV_SEL", "RZ_BOOT_CPU_SELECT"]
+[[q.source]]
+doc_no = "R01UH1077EJ0120"
+rev = "1.20"
+pages = [42]
+section = "2.3.9"
+[[q.source]]
+doc_no = "R01UH1193EJ0100"
+rev = "1.00"
+pages = [18]
+section = "2.4.1"
+[[q.source]]
+doc_no = "R01UH1193EJ0100"
+rev = "1.00"
+pages = [19]
+section = "2.4.2"
+[[q.source]]
+doc_no = "R01UH1193EJ0100"
+rev = "1.00"
+pages = [28]
+section = "3.7"
+[[q.source]]
+doc_no = "R01UH1193EJ0100"
+rev = "1.00"
+pages = [43]
+section = "3.19"
+
+[[q]]
+id = "BRD-02"
+type = "board"
+question = "Which LPDDR4 device and which PMIC are populated on the RZ/G3L SMARC module, and is that DRAM on Renesas' verified DRAM list for RZ/G3L?"
+answer = "LPDDR4: Micron MT53E1G16D1ZW-046 WT (BOM: MT53E1G16D1ZW-046WT, reference UM1, 'memory,LPDDR4,SDRAM,2GiBytes,1Gx16'). PMIC: Renesas RAA215300A2GNP#HAA (BOM reference IC2, 9-channel PMIC supporting DDR memory with built-in charger and RTC), supplied with 5 V. Yes: in the RZ Family DRAM List (Table 1.3 RZ/G3 Group) RZ/G3L lists Micron MT53E1G16D1ZW-046WT, LPDDR4, 16Gb, 16 bits, 1 rank, validated by Renesas Electronics, Option-1 (DRAM operation and characteristics verified with an EVK by Renesas)."
+key_facts = ["MT53E1G16D1ZW-046", "RAA215300A2GNP#HAA", "16Gb", "Option-1"]
+[[q.source]]
+doc_no = "R01UH1193EJ0100"
+rev = "1.00"
+pages = [23]
+section = "3.2"
+[[q.source]]
+doc_no = "R01UH1193EJ0100"
+rev = "1.00"
+pages = [28]
+section = "3.5"
+[[q.source]]
+doc_no = "D020781_02_V0300"
+rev = "V0300"
+pages = []
+section = "RZG3L_SMARC_MODULE_BOM.csv rows UM1 and IC2"
+[[q.source]]
+doc_no = "R01AN7912EJ0107"
+rev = "1.07"
+pages = [1, 5]
+section = "1.3"
+
+[[q]]
+id = "BRD-03"
+type = "board"
+question = "RZ SMARC Carrier Board II 在默认 VBUS_SEL 设置下需要什么规格的 USB-PD 电源适配器？SW_MODE[4] 为 ON 和 OFF 时有什么区别？"
+answer = "VBUS_SEL is set to 3 by default (15 V). Table 2.4 Minimum USB-PD Power Adapter Requirements: SW_MODE[4] = ON, VBUS_SEL = 3 -> 15 V, 2A, 30 W; SW_MODE[4] = OFF, VBUS_SEL = 3 -> 15 V, 4A, 60 W. SW_MODE[4] is not a boot-mode switch; it selects the minimum current requested from the USB-C power input. The adapter is not supplied; Renesas verified operation with a PowerPort III USB-PD power adapter (M/N: A2712121) and a PowerLine II USB Type-C cable (M/N: A8485011)."
+key_facts = ["VBUS_SEL", "30 W", "60 W", "A2712121"]
+[[q.source]]
+doc_no = "R01UH1077EJ0120"
+rev = "1.20"
+pages = [33, 34]
+section = "2.3.1"
+[[q.source]]
+doc_no = "R01UH1077EJ0120"
+rev = "1.20"
+pages = [42]
+section = "2.3.9"
+
+[[q]]
+id = "BRD-04"
+type = "board"
+question = "I just received the RZ/G3L Evaluation Board Kit. What does the kit consist of, and which software package does the Quick Start Guide recommend for a first evaluation?"
+answer = "The EVK is a module board (SOM) plus a carrier board; the module complies with the SMARC v2.1 standard. Main contents (as printed): RZ/G3L Module Board (SMARC2.1), Common Carrier Board, USB Cable (USB Type-A to Micro B), SMARC Camera Adaptor, SMARC Dual LVDS-HDIM [sic] Adaptor, SMARC DSI-HDMI Adaptor, SMARC RGB-HDMI Adaptor, SMARC Breakout Adaptor, Spacer and Screws for ML2 [sic] Cards. For users new to RZ/G the QSG recommends starting with the RZ/G HMI SDK: use the pre-built image in the package to create a bootable microSD card and boot Linux immediately (demo applications and a toolchain installer are included). VLP and, for expert users who want the latest LTS kernel, the RZ Linux BSP Plus are the alternatives."
+key_facts = ["SMARC v2.1", "HMI SDK", "microSD", "BSP Plus"]
+[[q.source]]
+doc_no = "R01QS0101EJ0101"
+rev = "1.01"
+pages = [2]
+section = "1.2"
+[[q.source]]
+doc_no = "R01QS0101EJ0101"
+rev = "1.01"
+pages = [3, 4]
+section = "2.1"
+
+# ---------------------------------------------------------------------------
+# Datasheet
+# ---------------------------------------------------------------------------
+
+[[q]]
+id = "DS-01"
+type = "datasheet"
+question = "What is the recommended operating range of the RZ/G3L DDR I/O supply VDDQ_DDR for LPDDR4 and for DDR4?"
+answer = "Datasheet Table 3.2 Recommended Operating Range, VDDQ_DDR (symbol DDR_VDDQ, group G10): LPDDR4 (1.1 V) min 1.06 V, typ 1.1 V, max 1.17 V; DDR4 (1.2 V) min 1.14 V, typ 1.2 V, max 1.26 V. (For reference, VAA18_DDR is 1.65 / 1.8 / 1.95 V.)"
+key_facts = ["DDR_VDDQ", "1.06", "1.17", "1.14", "1.26"]
+[[q.source]]
+doc_no = "R01DS0469EJ0110"
+rev = "1.10"
+pages = [23]
+section = "3.2"
+
+# ---------------------------------------------------------------------------
+# Linux driver manual
+# ---------------------------------------------------------------------------
+
+[[q]]
+id = "SW-01"
+type = "software"
+question = "In the RZ Linux BSP, how is the RZ/G3L watchdog enabled (kernel config symbol, driver source file, device-tree compatible string), and which WDT channels does the driver support on RZ/G3L?"
+answer = "Kernel config: Device Drivers -> Watchdog Timer Support -> Renesas RZ/G2L WDT Watchdog, i.e. CONFIG_RENESAS_G2LWDT=y; driver source drivers/watchdog/rzg2l_wdt.c. RZ/G3L node in arch/arm64/boot/dts/renesas/r9a08g046.dtsi: wdt0: watchdog@12800800 with compatible = \"renesas,r9a08g046-wdt\", \"renesas,rzg2l-wdt\", reg = <0 0x12800800 0 0x400>, clocks R9A08G046_WDT0_PCLK / R9A08G046_WDT0_CLK (clock-names \"pclk\", \"oscclk\"), interrupt-names \"wdt\", \"perrout\". RZ/G3L is supported on kernel v6.12; it supports WDT0 for Non-Secure CPU mode and WDT1 for Secure CPU mode. Timeout range 43,69 ms to 178956,97 ms (as printed). Table 4-1 device nodes: WDT0 = /dev/watchdog0, WDT1 = /dev/watchdog1 (major 245)."
+key_facts = ["CONFIG_RENESAS_G2LWDT", "rzg2l_wdt.c", "renesas,r9a08g046-wdt", "v6.12", "WDT1"]
+[[q.source]]
+doc_no = "R01US0479EJ0115"
+rev = "1.15"
+pages = [7, 9, 10]
+section = "1.1, 1.2, 3.2, 4.1"
+[[q.source]]
+doc_no = "R01US0479EJ0115"
+rev = "1.15"
+pages = [17]
+section = "4.5.1"
+[[q.source]]
+doc_no = "R01US0479EJ0115"
+rev = "1.15"
+pages = [20]
+section = "6.1, 6.2"
+
+# ---------------------------------------------------------------------------
+# Negative questions
+# ---------------------------------------------------------------------------
+
+[[q]]
+id = "NEG-01"
+type = "negative"
+question = "What is the register offset and reset value of the GBETH MAC_Configuration register on RZ/G3L?"
+answer = "Not in the provided documents. Section 6.3 Gigabit Ethernet Interface (GBETH) of the hardware manual says it is a simplified version and only contains 6.3.1 Overview (features, block diagram, external pins; pp.1850-1853), with no register map. For more information it refers to the Hardware Manual Additional Document, which the cover page says is under NDA and which is not part of this document set. The Linux Gigabit Ethernet driver manual only gives device-tree nodes, not MAC registers."
+key_facts = ["simplified version", "Hardware Manual Additional Document", "NDA"]
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [1]
+section = "Cover"
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [1850]
+section = "6.3"
+
+[[q]]
+id = "NEG-02"
+type = "negative"
+question = "Which timer module does section 5.6 of the RZ/G3L hardware manual describe, and what is its base address?"
+answer = "Not in the provided documents: R01UH1153EJ0110 Rev.1.10 has no section 5.6. Section 5 goes from 5.5 General Timer (GTM, p.1213) straight to 5.7 General PWM Timer (GPT, p.1230), and the 5.1 Timer Overview (p.1180) lists only SYC (5.2), WDT (5.4), GTM (5.5), GPT (5.7), POEG (5.8), MTU3a (5.9) and POE3 (5.10). The manual does not say what the skipped number would be (other skipped numbers: 3.3, 5.3, 6.4, 7.6, 8.2-8.4). A correct answer must not return 5.5 or 5.7 content as if it were 5.6."
+key_facts = ["5.5", "5.7", "GTM", "GPT"]
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [33]
+section = "Table of Contents"
+[[q.source]]
+doc_no = "R01UH1153EJ0110"
+rev = "1.10"
+pages = [1180]
+section = "5.1"
