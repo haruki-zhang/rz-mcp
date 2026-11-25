@@ -337,6 +337,25 @@ Tesera 是 RZ/G2L 客户板的 bring-up（`MACHINE=rzg2l-tlc-01`，VLP v4.0.2，
 2. **U-Boot 的网口**：两个网口都报 `No valid MAC address found`，所以 U-Boot 显示 `No ethernet found`。Start-up Guide 里那行 `No ethernet found` 很可能也是这个原因。临时设置本地管理型 MAC 之后，网口就能用了。这个 MAC 只在内存里，`env default -a` 之后不会被保存。
 3. **网线接在哪个口**：这次网线接在 GBE1（`ethernet@11c40000`）。没接线的 eth0 会先等待 PHY 自协商超时，之后 U-Boot 才自动换到下一个口。
 
+**范围和工具整合（同日）**：
+
+- **用户确定的范围**：
+  1. 在 SCIF 下载模式下，写 BL2 和 FIP，写入对象是 eMMC 或 QSPI；
+  2. 从 eMMC 启动后，把 rootfs 写进 eMMC；
+  3. QSPI 启动和 eSD 启动所用的 SD 卡由人在主机上写，不做成脚本。
+
+  因此删除了 `evk-write-sd`（它也没有在实机上验证过）。原来的 `evk-write-emmc` 合并进新命令 `evk-flash`，新命令有五个子命令：`doctor`、`bootloader {emmc,qspi}`、`rootfs`、`emmc`、`clean`。
+- **为可复用和可靠性做的改动**：
+  - 写入地址只写在一处（`media.py`），每个值注明出处；
+  - 启动时自动判断板子状态（停在 U-Boot 或 Flash Writer 时直接接着做）；
+  - 串口独占；
+  - 运行前检查（`doctor`）；
+  - 以镜像为准做交叉校验：WIC 在 768s 和 4992s 处内嵌的 fip 和 CM33 固件，必须和要写入的文件一致，以此证明来自同一次构建，并选定 CM33 固件；
+  - 每次运行生成报告（json 和 md）；
+  - 清理暂存的 TFTP 分块；
+  - 离线测试改为由"模拟操作员"线程驱动，假板子的提示文字取自实机日志。
+- **QSPI（`XLS2`）**：已实现，离线测试通过；还没有在实机上运行。
+
 后续可以改进的地方：TFTP 只有约 1 MiB/s，可以试一下调大 `tftpblocksize` 或 `tftpwindowsize`（dnsmasq 是否支持需要实测）；上板验证可以再加上对 `CM33 state` 等启动日志的检查。
 
 **方案**（B3 时实施）

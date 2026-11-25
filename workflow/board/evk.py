@@ -81,6 +81,13 @@ def srec_decode(path: Path) -> tuple[int, bytes]:
     return lo, bytes(buf)
 
 
+def wic_read(image: Path, offset: int, length: int) -> bytes:
+    """Read bytes of the uncompressed WIC (sequential gzip; meant for the first few MiB)."""
+    with gzip.open(image, "rb") as f:
+        f.read(offset)
+        return f.read(length)
+
+
 def stage_image(image: Path, bmap_path: Path, stage: Path, chunk_bytes: int) -> dict:
     """Check every mapped range of the image against the bmap sha256 and cut the mapped data into CRC32'd chunks."""
     bm = read_bmap(bmap_path)
@@ -122,7 +129,10 @@ def stage_image(image: Path, bmap_path: Path, stage: Path, chunk_bytes: int) -> 
 
 class Console:
     def __init__(self, port: str = PORT, baud: int = 115200, log: str | None = None, echo: bool = False):
-        self.ser = serial.Serial(port, baud, timeout=0.05)
+        try:   # exclusive: a second tool or a terminal program on the same console would corrupt the transfers
+            self.ser = serial.Serial(port, baud, timeout=0.05, exclusive=True)
+        except serial.SerialException as e:
+            raise BoardError(f"cannot open {port}: {e} (另一个工具或终端程序正在使用串口？)") from e
         self.buf = ""
         self.echo = echo
         self.log = open(log, "a", encoding="utf-8", errors="replace") if log else None
@@ -221,6 +231,49 @@ class Console:
         out = self.fw_cmd(f"{value:x}", FW_PROMPT)
         if not re.search(rf"EXT_CSD\[{index:X}\] = 0x{value:02X}", out, re.I):
             raise BoardError(f"EXT_CSD[{index:#x}] not set to {value:#04x}: {out!r}")
+
+    def fw_xls2(self, prog: int, save: int, srec: Path, size: int) -> dict:
+        """QSPI write (SUG 4.4): program top address, QSPI save address, S-records; answer 'y' to
+        "Clear OK?(y/n)". Returns the start/end address Flash Writer reports."""
+        self.fw_cmd("XLS2", r"Program Top Address[\s\S]*?Please Input : H'")
+        self.fw_cmd(f"{prog:x}", r"Qspi Save Address[\s\S]*?Please Input : H'")
+        self.fw_cmd(f"{save:x}", r"please send !", 30)
+        self.buf = ""
+        self.send_file(srec)
+        text = ""
+        while True:            # "Clear OK?(y/n)" may come before the erase or after the save information (SUG 4.4)
+            i, part = self.expect([r"Clear OK\?\(y/n\)",
+                                   r"Qspi Save Information[\s\S]*?End Address\s*:\s*H'[0-9A-Fa-f]+[\s\S]*?" + FW_PROMPT], 300)
+            text += part
+            if i == 1:
+                break
+            self.send("y")
+            if "Qspi Save Information" in text:
+                text += self.expect([FW_PROMPT], 60)[1]
+                break
+        st = re.search(r"Stat Address\s*:\s*H'([0-9A-Fa-f]+)", text)
+        en = re.search(r"End Address\s*:\s*H'([0-9A-Fa-f]+)", text)
+        got = {"start": int(st.group(1), 16) if st else None, "end": int(en.group(1), 16) if en else None}
+        got["matches"] = got["start"] == save and got["end"] == save + size - 1
+        return got
+
+    def probe(self) -> str:
+        """Where is the board? 'uboot', 'fw' (Flash Writer prompt; left at 921600 or 115200 accordingly) or
+        'unknown' (off, BootROM, Linux, ...). Sends only Ctrl-C and CR; every caller asks for power-on/RESET
+        when the answer is 'unknown', so a stray byte to the BootROM does no harm."""
+        if self.at_prompt(1.0):
+            return "uboot"
+        for rate in (921600, 115200):
+            self.baud(rate)
+            self.buf = ""
+            self.send("\r")
+            try:
+                self.expect([FW_PROMPT], 1.0)
+                return "fw"
+            except TimeoutError:
+                pass
+        self.baud(115200)
+        return "unknown"
 
     # ---- U-Boot ----
     def at_prompt(self, wait: float = 1.0) -> bool:
