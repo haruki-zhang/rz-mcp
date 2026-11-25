@@ -19,8 +19,8 @@ sudo bash workflow/board/setup-host.sh
 
 1. USB 网卡接到 Carrier II 上的任意一个 RJ45 口。工具会先试 eth0，不通再试 eth1。
 2. Carrier II 上标着 "UART Debug" 的 micro-USB 口（SER3，FT234XD）接到主机。接上后会出现 `/dev/rzg3l-evk-console`。
-3. 模块上的 SYS[1] 打到 ON，选择 microSD0。工具只写 SD 卡，检测到 eMMC 会拒绝写入。
-4. SW_MODE 设成板子上**现有**镜像能启动到 U-Boot 的模式。例如 microSD 里已有可启动的镜像时，用 eSD 模式：SW_MODE[1:3] = ON ON OFF。
+
+拨码开关怎么设，见下面各流程的说明。
 
 ## eMMC 启动（板子上没有 U-Boot 也可以）
 
@@ -37,6 +37,8 @@ workflow/board/evk-write-emmc --image <deploy>/<x>.wic.gz    # 启动文件从�
 碰板子之前，工具先做以下检查：每个 .srec 解码后要和同一次构建的 .bin 一致，起始地址要等于加载地址，并且不能和下一个文件重叠。
 
 ## 写入（microSD）
+
+写之前：模块上的 SYS[1] 打到 ON，选择 microSD0（工具只写 SD 卡，检测到 eMMC 会拒绝写入）；SW_MODE 设成板子上**现有**镜像能启动到 U-Boot 的模式，例如 eSD：SW_MODE[1:3] = ON ON OFF。
 
 ```sh
 workflow/board/evk-write-sd --image <x.wic.gz>      # 同一目录下要有 x.wic.bmap
