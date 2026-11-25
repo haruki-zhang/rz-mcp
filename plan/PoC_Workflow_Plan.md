@@ -305,6 +305,11 @@ Tesera 是 RZ/G2L 客户板的 bring-up（`MACHINE=rzg2l-tlc-01`，VLP v4.0.2，
   - 内核：官方 defconfig（@`e6c894b7`）里开着 `STMMAC_ETH`、`DWMAC_RENESAS_GBETH`、`IP_PNP_DHCP`、`NFS_FS` 和 `ROOT_NFS`。
 - **例外**：rzg3l-fast-boot-seamless-logo 的 `fastboot.cfg` 为了缩短启动时间，关掉了 `STMMAC_ETH`。用了这个层的 PoC，Linux 里没有以太网，因此不能用 NFS root。这种情况下 U-Boot 的 TFTP 仍然可以用；rootfs 改走 SD 卡，或者加一个只在开发时使用的配置片段，重新打开以太网。这个片段不放进交付物。
 
+**进度（2026-11-25）**：B3 中"写 microSD"这一部分已经做好（`workflow/board/`）。
+- 方式：板子进入 U-Boot 后，按 bmap 分块用 TFTP 下载，每块先校验 CRC32，再 `mmc write`，最后全部读回校验。只写有数据的区段，和 bmaptool 一样。
+- 离线测试 12 项全部通过（`eval/test_board.py`，对着假 U-Boot 运行）。其中，今天构建的 lpdemo 镜像（562 MB 有效数据）写入后，13 个区段的 sha256 都和 bmap 一致。
+- 还没在实机上运行：需要用户先执行 `setup-host.sh`，并接好板子。
+
 **方案**（B3 时实施）
 
 | 项目 | 设置 |
