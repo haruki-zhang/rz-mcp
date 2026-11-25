@@ -31,8 +31,9 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-import evk     # noqa: E402
-import media   # noqa: E402
+import evk       # noqa: E402
+import media     # noqa: E402
+import progress  # noqa: E402
 
 RZ = HERE.parent.parent
 IFACE = "enx207bd2aa6c7a"
@@ -222,27 +223,58 @@ def print_checks(checks: list) -> bool:
     return all(c["result"] != "FAIL" for c in checks)
 
 
+# ---------------------------------------------------------------- progress plan
+
+# Rates measured on the EVK on 2026-11-25 (data/board-runs/): they only feed the time-left estimate.
+FW_RATE, SREC_RATE, TFTP_RATE, VERIFY_RATE = 11e3, 40e3, 1.0 * (1 << 20), 23 * (1 << 20)
+ROLE = {"bl2": "BL2", "fip": "FIP", "cm33": "CM33 固件"}
+
+
+def make_plan(cmd: str, target: str | None, files: list, deploy: Path, mapped: int, boot_check: str) -> list:
+    plan = []
+    if cmd in ("bootloader", "emmc"):
+        mot = (deploy / media.FLASH_WRITER).stat().st_size
+        plan += [("fw", "发送 Flash Writer（SCIF 下载模式，115200 bps）", 10 + mot / FW_RATE), ("sup", "切换到 921600 bps", 2)]
+        to = "eMMC boot 分区 1" if target == "emmc" else "QSPI"
+        plan += [(f"w:{f.role}", f"写入 {ROLE[f.role]} → {to}", (deploy / f.srec).stat().st_size / SREC_RATE) for f in files]
+        if target == "emmc":
+            plan.append(("extcsd", "设置 EXT_CSD（B1=0x02，B3=0x08）", 3))
+    if cmd == "bootloader" and boot_check != "none":
+        plan.append(("bootcheck", "启动确认", 20))
+    if cmd in ("rootfs", "emmc"):
+        plan += [("stage", "准备 TFTP 分块（主机）", 5), ("uboot", "进入 eMMC 上的 U-Boot", 15), ("net", "U-Boot 网络", 10),
+                 ("write", "写入 rootfs（TFTP → eMMC user 区）", mapped / TFTP_RATE),
+                 ("verify", "读回校验（CRC32）", mapped / VERIFY_RATE + 10), ("saveenv", "保存 U-Boot 环境变量", 3),
+                 ("boot", "重启并确认启动", 12)]
+    return plan
+
+
 # ---------------------------------------------------------------- phases
 
-def phase_bootloader(con: "evk.Console", run: Run, target: str, deploy: Path, files: list, a) -> None:
+def phase_bootloader(con: "evk.Console", run: Run, prog, target: str, deploy: Path, files: list, a) -> None:
+    prog.start("fw", media.FLASH_WRITER)
     state = "unknown" if a.bootrom_waiting else con.probe()
     run.step("probe", state=state)
     if state == "fw":
-        print("flash writer: already running; skipping the download")
+        prog.finish("flash writer: already running; skipping the download")
+        prog.start("sup")
         if con.ser.baudrate != 921600:
             con.fw_speed_up()
     else:
         if not a.bootrom_waiting:
-            evk.human(media.MSG_SCIF)
+            con.ask_human(media.MSG_SCIF)
         run.step("human: SCIF download mode, power on")
         banner = con.scif_download(deploy / media.FLASH_WRITER, a.wait, already_waiting=a.bootrom_waiting)
-        print("flash writer:", banner)
         run.step("flash writer", banner=banner)
+        prog.finish(banner.replace("Flash writer for RZ/G3L Series ", "Flash Writer ") + " 已启动")
+        prog.start("sup")
         con.fw_speed_up()
-    print("flash writer: 921600 bps")
+    prog.finish("921600 bps")
     for f in files:
-        t0 = time.time()
         data = evk.srec_decode(deploy / f.srec)[1]
+        where = f"sector {f.dest:#x}" if target == "emmc" else f"{f.dest:#x}"
+        prog.start(f"w:{f.role}", f"{f.srec}，{len(data)} 字节 → {where}")
+        t0 = time.time()
         if target == "emmc":
             con.fw_em_w(media.EMMC_PARTITION, f.dest, f.prog, deploy / f.srec)
             to = f"eMMC boot partition {media.EMMC_PARTITION} sector {f.dest:#x}"
@@ -250,39 +282,48 @@ def phase_bootloader(con: "evk.Console", run: Run, target: str, deploy: Path, fi
             got = con.fw_xls2(f.prog, f.dest, deploy / f.srec, len(data))
             to = f"QSPI {f.dest:#x}"
             if not got["matches"]:
-                print(f"  warning: Flash Writer reported {got} for {f.srec} ({len(data)} bytes at {f.dest:#x})")
+                prog.note(f"warning: Flash Writer reported {got} for {f.srec} ({len(data)} bytes at {f.dest:#x})")
             run.step("xls2 reported", file=f.srec, **{k: (hex(v) if isinstance(v, int) else v) for k, v in got.items()})
         secs = round(time.time() - t0)
-        print(f"{'EM_W' if target == 'emmc' else 'XLS2'} {f.srec} -> {to} (load {f.prog:#x}) OK ({secs}s)")
+        prog.finish(f"{'EM_W' if target == 'emmc' else 'XLS2'} OK，加载地址 {f.prog:#x}")
         run.data["written"].append({"what": f.role, "file": f.srec, "to": to, "bytes": len(data),
                                     "sha256": hashlib.sha256(data).hexdigest()})
         run.step("written", file=f.srec, to=to, seconds=secs)
     if target == "emmc":
+        prog.start("extcsd")
         for idx, val in media.EMMC_EXT_CSD:
             con.fw_em_secsd(idx, val)
-            print(f"EXT_CSD[{idx:#X}] = {val:#04x} OK")
             run.step("ext_csd", index=hex(idx), value=hex(val))
+        prog.finish("已设置")
     con.baud(115200)
 
 
-def phase_rootfs(con: "evk.Console", run: Run, image: Path, bmap: Path, image_id: str, a) -> None:
+def phase_rootfs(con: "evk.Console", run: Run, prog, image: Path, bmap: Path, image_id: str, a) -> None:
     rel = f"evk/{image_id}"
+    prog.start("stage", image.name)
     man = evk.stage_image(image, bmap, a.tftp_root / rel, a.chunk_mb << 20)
+    prog.finish(f"{len(man['chunks'])} 块，{man['mapped_bytes'] / 2**20:.0f} MiB 有效数据")
+    prog.start("uboot")
     state = con.probe()
     run.step("probe", state=state)
     con.baud(115200)                      # probe() leaves 921600 when it finds Flash Writer; U-Boot runs at 115200
     if state != "uboot":
         con.stop_autoboot(a.wait, media.MSG_EMMC)
         run.step("human: eMMC boot, power on")
+    con.wait_label = None
     card = con.mmc_select(0, 0)
-    print(f"mmc 0 (user area): {card['type']}, {card['capacity'] / 2**30:.1f} GiB")
     if card["type"] != "MMC":
         raise evk.BoardError("mmc 0 is not the eMMC; set SYS[1] = OFF on the module")
     if card["capacity"] < man["image_size"]:
         raise evk.BoardError(f"eMMC too small: {card['capacity']} < image {man['image_size']} bytes")
+    prog.finish(f"mmc 0 是 eMMC（user 区 {card['capacity'] / 2**30:.1f} GiB）")
+    prog.start("net")
+    con.wait_label = "ping 主机（没接网线的口要等 PHY 协商超时）"
     net = con.net_setup()
-    print("network:", net)
+    con.wait_label = None
+    prog.finish(f"network: {net}")
     run.step("network", port=net)
+    prog.start("write", f"{len(man['chunks'])} 块")
     t0 = time.time()
     con.write_chunks(man, rel, verify=True)
     secs = round(time.time() - t0)
@@ -291,26 +332,48 @@ def phase_rootfs(con: "evk.Console", run: Run, image: Path, bmap: Path, image_id
     run.data["written"].append({"what": "rootfs (WIC, mapped ranges)", "file": image.name, "to": "eMMC user area",
                                 "bytes": man["mapped_bytes"], "sha256": sha256(image)})
     if not a.no_saveenv:                  # SUG 8.2.4: the eMMC boot environment
+        prog.start("saveenv")
         con.cmd("env default -a")
         out = con.cmd("saveenv", timeout=30)
         if "OK" not in out:
             raise evk.BoardError(f"saveenv: {out!r}")
-        print("env: default environment saved to eMMC")
+        prog.finish("env: default environment saved to eMMC")
         run.step("saveenv")
-    boot_check(con, run, "reset", a.expect, a.wait)
+    boot_check(con, run, prog, "reset", a.expect, a.wait, "boot")
 
 
-def boot_check(con: "evk.Console", run: Run, how: str, expect: str, wait: float) -> None:
+def boot_check(con: "evk.Console", run: Run, prog, how: str, expect: str, wait: float, key: str) -> None:
+    prog.start(key)
     con.buf = ""
     if how == "reset":
+        con.watch("等待板子重启后启动完成")
         con.send("reset\r")
     else:
-        evk.human(how)
+        con.ask_human(how)
+        con.watch("等待板子启动")
     t0 = time.time()
     con.expect([expect], wait)
+    con.wait_label = None
     secs = round(time.time() - t0)
-    print(f"boot check: '{expect}' seen {secs}s after {'reset' if how == 'reset' else 'the request above'}")
+    prog.finish(f"boot check: '{expect}' seen {secs}s after {'reset' if how == 'reset' else 'the request above'}")
     run.step("boot check", expect=expect, seconds=secs)
+
+
+def show_status(log_dir: Path, run_dir: Path | None, watch: bool) -> None:
+    files = [run_dir / "status.json"] if run_dir else sorted(log_dir.glob("*/status.json"), key=lambda p: p.stat().st_mtime)
+    if not files or not files[-1].exists():
+        sys.exit(f"no run with a status.json in {run_dir or log_dir}")
+    path, last = files[-1], None
+    print(f"run: {path.parent}")
+    while True:
+        st = json.loads(path.read_text())
+        text = progress.describe(st)
+        if text != last:
+            print(text + ("\n" if watch else ""), flush=True)
+            last = text
+        if not watch or st["state"] in ("done", "failed"):
+            return
+        time.sleep(2)
 
 
 # ---------------------------------------------------------------- commands
@@ -345,8 +408,14 @@ def main() -> None:
     e.add_argument("--image", type=Path, required=True)
     c = sub.add_parser("clean", parents=[common])
     c.add_argument("--keep", type=int, default=1, help="keep the N most recently staged images (default 1)")
+    s = sub.add_parser("status", parents=[common], help="show the state of the latest (or a given) run")
+    s.add_argument("--run", type=Path, help="run directory (default: the latest in --log-dir)")
+    s.add_argument("--watch", action="store_true", help="keep showing changes until the run ends")
     a = ap.parse_args()
 
+    if a.cmd == "status":
+        show_status(a.log_dir, a.run, a.watch)
+        return
     if a.cmd == "clean":
         staged = sorted((a.tftp_root / "evk").glob("*/manifest.json"), key=lambda p: p.stat().st_mtime, reverse=True)
         for m in staged[a.keep:]:
@@ -375,6 +444,8 @@ def main() -> None:
         sys.exit(0 if ok else 1)
 
     run = Run(a.cmd if a.cmd != "bootloader" else f"bootloader-{target}", a.log_dir)
+    prog = progress.Progress(run.dir / "status.json")
+    print(f"status: evk-flash status --watch   (or {run.dir / 'status.json'})")
     run.data["checks"] = [] if a.skip_host_checks else host_checks(a.port, a.tftp_root)
     files = []
     try:
@@ -383,23 +454,31 @@ def main() -> None:
             run.data["checks"] += fchecks
         if not print_checks(run.data["checks"]):
             raise evk.BoardError("pre-flight checks failed (see above)")
+        mapped = 0
+        if bmap:
+            bm = evk.read_bmap(bmap)
+            mapped = sum((b - a_ + 1) * bm["block_size"] for a_, b, _ in bm["ranges"])
+        prog.set_plan(make_plan(a.cmd, target, files, deploy, mapped, getattr(a, "boot_check", "none")))
         con = evk.Console(a.port, log=str(run.console))
+        con.progress = prog
         try:
             if a.cmd in ("bootloader", "emmc"):
-                phase_bootloader(con, run, target, deploy, files, a)
+                phase_bootloader(con, run, prog, target, deploy, files, a)
             if a.cmd == "bootloader" and a.boot_check != "none":
                 msg = media.MSG_EMMC if target == "emmc" else media.MSG_QSPI
-                boot_check(con, run, msg, r"U-Boot 20\d\d" if a.boot_check == "uboot" else a.expect, a.wait)
+                boot_check(con, run, prog, msg, r"U-Boot 20\d\d" if a.boot_check == "uboot" else a.expect, a.wait, "bootcheck")
             if a.cmd in ("rootfs", "emmc"):
-                phase_rootfs(con, run, image, bmap, image_id, a)
+                phase_rootfs(con, run, prog, image, bmap, image_id, a)
         finally:
             con.close()
     except (evk.BoardError, TimeoutError, SystemExit) as e:
         msg = str(e) if not isinstance(e, SystemExit) else f"stopped: {e.code}"
         run.finish(False, msg)
+        prog.end(False, msg)
         print(f"FAILED: {msg}")
         sys.exit(1)
     run.finish(True)
+    prog.end(True, f"{a.cmd} 完成，记录在 {run.dir}")
     print("OK")
 
 

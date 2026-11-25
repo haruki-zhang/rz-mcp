@@ -30,7 +30,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-import evk  # noqa: E402
+import evk       # noqa: E402
+import progress  # noqa: E402
 
 WHERE = ("linux", "host", "boot")
 
@@ -88,11 +89,19 @@ def main() -> None:
     run_dir = poc / "design" / "verify-logs" / time.strftime("%Y%m%d-%H%M%S")
     run_dir.mkdir(parents=True)
     con = evk.Console(a.port, log=str(run_dir / "console.log"))
+    prog = progress.Progress(run_dir / "status.json")
+    steps = ([("login", "登录板子上的 Linux", 10)] if any(c["where"] != "host" for c in checks) else []) + \
+        [(c["id"], f"{c['id']} {c['title']}", 20 if c["where"] == "boot" else 3) for c in checks]
+    prog.set_plan(steps)
+    con.progress = prog
     results, vars_ = [], {}
     try:
         if any(c["where"] in ("linux", "boot") for c in checks):
+            prog.start("login")
             con.linux_shell(a.wait)
+            prog.finish("root shell")
         for c in checks:
+            prog.start(c["id"], c.get("run", "重启并计时") if c["where"] != "boot" else "重启并计时")
             r = {k: c.get(k) for k in ("id", "title", "requirement", "where")}
             t = c.get("timeout", 60)
             try:
@@ -125,7 +134,7 @@ def main() -> None:
                             r["captured"] = {c.get("capture_as", c["id"]): m.group(1)}
             except (TimeoutError, KeyError, subprocess.TimeoutExpired, evk.BoardError) as e:
                 r.update(observed=f"error: {e}", expected=c.get("expect", c.get("max_seconds", "")), **{"pass": False})
-            print(f"{'PASS' if r['pass'] else 'FAIL'} {r['id']} {r['title']}: {r['observed']}", flush=True)
+            prog.finish(f"{'PASS' if r['pass'] else 'FAIL'} {r['id']} {r['title']}: {r['observed']}", ok=r["pass"])
             results.append(r)
     finally:
         con.close()
@@ -150,7 +159,7 @@ def main() -> None:
         if r.get("command"):
             lines += [f"### {r['id']}", "", f"```text\n$ {r['command']}\n{r['output'][-1500:]}\n```", ""]
     (poc / "design" / "03-verification.md").write_text("\n".join(lines) + "\n")
-    print(f"{passed}/{len(results)} passed; report: {poc / 'design' / '03-verification.md'}")
+    prog.end(passed == len(results), f"{passed}/{len(results)} passed; report: {poc / 'design' / '03-verification.md'}")
     sys.exit(0 if passed == len(results) else 1)
 
 

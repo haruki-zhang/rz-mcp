@@ -239,6 +239,7 @@ def later_steps(name: str, repo: Path, s: dict) -> str:
    - 只改了内核或 rootfs：`evk-flash rootfs --image <deploy>/{s['wic']}`；
    - 改了 BL2、FIP 或 CM33 固件：`evk-flash emmc --image <deploy>/{s['wic']}`。
 3. 在后台运行。看到 `>>> 需要你操作` 时，把内容原样转告用户（拨码、上电等）。
+   用户问进度时，运行 `/usr/bin/python3 {BOARD}/evk-flash status`，它会给出当前步骤、百分比、剩余时间，以及是否在等人操作。如果用户自己在终端里运行，进度会在终端里实时显示。
 4. 写入成功后，再次运行 `/rz-docs:poc {name}`。"""
     if not s["verified"]:
         fail = ("\n上一次验证有未通过的项，见 `design/03-verification.md`。向用户逐项说明，按用户的决定处理："

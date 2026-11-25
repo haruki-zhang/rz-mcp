@@ -292,7 +292,8 @@ def main() -> None:
           f"Add it in Claude Code:\n"
           f"  claude mcp add --scope user --transport http rz-docs {url} --header \"Authorization: Bearer <token in data/.token>\"\n",
           file=sys.stderr)
-    uvicorn.run(BearerAuth(app, token), host=a.host, port=a.port, log_level="info")
+    # a client that keeps a stream open must not hold a restart for systemd's 90 s stop timeout
+    uvicorn.run(BearerAuth(app, token), host=a.host, port=a.port, log_level="info", timeout_graceful_shutdown=5)
 
 
 if __name__ == "__main__":

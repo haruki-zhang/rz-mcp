@@ -59,7 +59,8 @@ def sparse(path: Path | None, size: int) -> None:
 class FakeUBoot:
     def __init__(self, tftp_root: Path, sd: Path, sd_size: int = 2 << 30, eth_ok: str = "eth1", mmc_type: str = "MMC",
                  state: str = "off", corrupt_first_tftp: bool = False, boot1: Path | None = None,
-                 qspi: Path | None = None, no_mac: bool = True, linux_cmds: dict | None = None):
+                 qspi: Path | None = None, no_mac: bool = True, linux_cmds: dict | None = None,
+                 tftp_rate: float = 0.0):
         self.master, slave = pty.openpty()
         tty.setraw(slave)
         self.port, self._slave = os.ttyname(slave), slave
@@ -75,6 +76,7 @@ class FakeUBoot:
         self.line, self.stop, self.prev = "", False, ""
         self.fw = {"step": "cmd", "lines": []}
         self.linux_cmds = linux_cmds or {}      # shell command -> (output, exit status)
+        self.tftp_rate = tftp_rate              # bytes/s for a visible transfer (0: instant)
         self.state = state                    # off | bootrom | fw | countdown | prompt | rebooting | login | shell
         if state == "prompt":
             self.env = self._uboot_env()
@@ -334,9 +336,22 @@ class FakeUBoot:
             if self.corrupt_next:
                 data, self.corrupt_next = bytes([data[0] ^ 1]) + data[1:], False
             self.mem[addr] = data
-            return (f"Using ethernet@11c40000 device\nTFTP from server 192.168.50.1; our IP address is 192.168.50.2\n"
-                    f"Filename '{a[2]}'.\nLoad address: {addr:#x}\nLoading: #################\n\t 1 MiB/s\ndone\n"
-                    f"Bytes transferred = {len(data)} ({len(data):x} hex)")
+            self.out(f"Using ethernet@11c40000 device\nTFTP from server 192.168.50.1; our IP address is 192.168.50.2\n"
+                     f"Filename '{a[2]}'.\nLoad address: {addr:#x}\nLoading: *")
+            blocks = -(-len(data) // 1468)                 # net/tftp.c: '#' every 10 blocks, a new line every 650
+            marks = ""
+            for pos in range(blocks):
+                if pos % 10 == 0:
+                    marks += "#"
+                elif (pos + 1) % 650 == 0:
+                    marks += "\n\t "
+                if self.tftp_rate and pos % 100 == 99:
+                    self.out(marks)
+                    marks = ""
+                    self.lock.release()
+                    time.sleep(100 * 1468 / self.tftp_rate)
+                    self.lock.acquire()
+            return (marks + "\n\t 1 MiB/s\ndone\n" f"Bytes transferred = {len(data)} ({len(data):x} hex)")
         if a[0] == "crc32":
             addr, n = int(a[1], 16), int(a[2], 16)
             return f"CRC32 for {addr:08x} ... {addr + n - 1:08x} ==> {zlib.crc32(self.mem[addr][:n]) & 0xFFFFFFFF:08x}"

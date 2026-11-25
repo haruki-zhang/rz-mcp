@@ -129,6 +129,10 @@ def stage_image(image: Path, bmap_path: Path, stage: Path, chunk_bytes: int) -> 
 # ---------------------------------------------------------------- console
 
 class Console:
+    MILESTONES = [(r"SCIF? Download mode[^\n]*", "BootROM：SCIF 下载模式"), (r"Flash writer for RZ/G3L[^\n]*", None),
+                  (r"BL2: v[^\n]*", None), (r"BL31: v[^\n]*", None), (r"U-Boot 20\d\d\.\d\d[^\n]*", None),
+                  (r"Starting kernel", "Linux 内核开始启动"), (r"[\w-]+ login: ", "Linux 登录提示")]
+
     def __init__(self, port: str = PORT, baud: int = 115200, log: str | None = None, echo: bool = False):
         try:   # exclusive: a second tool or a terminal program on the same console would corrupt the transfers
             self.ser = serial.Serial(port, baud, timeout=0.05, exclusive=True)
@@ -136,6 +140,11 @@ class Console:
             raise BoardError(f"cannot open {port}: {e} (另一个工具或终端程序正在使用串口？)") from e
         self.buf = ""
         self.echo = echo
+        self.progress = None          # progress.Progress, set by the caller
+        self.tick = None              # called while waiting (live progress)
+        self.wait_label = None        # what we are waiting for (shown with the elapsed time)
+        self.seen = set()             # milestones already shown
+        self.recent = ""
         self.log = open(log, "a", encoding="utf-8", errors="replace") if log else None
 
     def close(self) -> None:
@@ -152,6 +161,15 @@ class Console:
             return False
         s = data.decode("utf-8", "replace").replace("\r\n", "\n").replace("\r", "\n")
         self.buf += s
+        if self.progress:
+            self.progress.human_done()
+            self.recent = (self.recent + s)[-4000:]
+            for rx, label in self.MILESTONES:
+                if rx not in self.seen:
+                    m = re.search(rx, self.recent)
+                    if m:
+                        self.seen.add(rx)
+                        self.progress.milestone(label or m.group(0).strip())
         if self.log:
             self.log.write(s)
             self.log.flush()
@@ -159,6 +177,22 @@ class Console:
             sys.stdout.write(s)
             sys.stdout.flush()
         return True
+
+    def say(self, text: str) -> None:
+        if self.progress:
+            self.progress.note(text)
+        else:
+            print(text, flush=True)
+
+    def ask_human(self, msg: str) -> None:
+        if self.progress:
+            self.progress.human(msg)
+        else:
+            human(msg)
+
+    def watch(self, label: str | None) -> None:
+        """Show milestones again from here on (a new boot), and what we are waiting for."""
+        self.seen, self.recent, self.wait_label = set(), "", label
 
     def send(self, s: str | bytes) -> None:
         self.ser.write(s.encode() if isinstance(s, str) else s)
@@ -169,6 +203,10 @@ class Console:
         for off in range(0, len(data), 4096):
             self.ser.write(data[off:off + 4096])
             self._pump()
+            if self.progress:
+                self.progress.update(min(off + 4096, len(data)), len(data))
+        if self.progress:
+            self.progress.update(len(data), len(data))
 
     def expect(self, patterns: list[str], timeout: float) -> tuple[int, str]:
         """Wait until one regex matches the buffered output; consume up to the match and return (index, text)."""
@@ -182,6 +220,10 @@ class Console:
             if time.time() > deadline:
                 raise TimeoutError(f"no {patterns!r} within {timeout:.0f}s; last output: {self.buf[-300:]!r}")
             self._pump()
+            if self.tick:
+                self.tick()
+            elif self.progress and self.wait_label:
+                self.progress.waiting(self.wait_label)
 
     # ---- BootROM SCIF download mode and Flash Writer ----
     def scif_download(self, mot: Path, wait: float, already_waiting: bool = False) -> str:
@@ -193,14 +235,19 @@ class Console:
         banner was printed before this run, so send at once."""
         if not already_waiting:
             self.buf = ""
+            self.watch("等待 BootROM（SCIF 下载模式）的提示")
             self.expect([r"please send !", r"-- Load Program to S\w*RAM"], wait)
             try:                                   # the rc1 wording adds "please send !" after the Load line
                 self.expect([r"please send !"], 1.0)
             except TimeoutError:
                 pass
-        print(f"BootROM: SCIF download mode; sending {mot.name} at 115200 bps ...", flush=True)
+        if not self.progress:              # with a progress display the milestone line says it already
+            self.say(f"BootROM: SCIF download mode; sending {mot.name} at 115200 bps ...")
+        self.wait_label = None
         self.send_file(mot)
+        self.wait_label = "等待 Flash Writer 启动"
         _, text = self.expect([r"Flash writer for RZ/G3L[^\n]*"], 120)
+        self.wait_label = None
         banner = re.search(r"Flash writer for RZ/G3L[^\n]*", text).group(0).strip()
         self.expect([FW_PROMPT], 10)
         return banner
@@ -223,7 +270,9 @@ class Console:
         self.fw_cmd(f"{prog_start:x}", r"please send !", 30)
         self.buf = ""
         self.send_file(srec)
+        self.wait_label = "Flash Writer 正在写入 eMMC"
         self.expect([r"EM_W Complete!"], 300)
+        self.wait_label = None
         self.expect([FW_PROMPT], 10)
 
     def fw_em_secsd(self, index: int, value: int) -> None:
@@ -241,6 +290,7 @@ class Console:
         self.fw_cmd(f"{save:x}", r"please send !", 30)
         self.buf = ""
         self.send_file(srec)
+        self.wait_label = "Flash Writer 正在擦除并写入 QSPI"
         text = ""
         while True:            # "Clear OK?(y/n)" may come before the erase or after the save information (SUG 4.4)
             i, part = self.expect([r"Clear OK\?\(y/n\)",
@@ -252,6 +302,7 @@ class Console:
             if "Qspi Save Information" in text:
                 text += self.expect([FW_PROMPT], 60)[1]
                 break
+        self.wait_label = None
         st = re.search(r"Stat Address\s*:\s*H'([0-9A-Fa-f]+)", text)
         en = re.search(r"End Address\s*:\s*H'([0-9A-Fa-f]+)", text)
         got = {"start": int(st.group(1), 16) if st else None, "end": int(en.group(1), 16) if en else None}
@@ -291,12 +342,15 @@ class Console:
         from the first boot output on, keep pressing a key until the prompt appears (also works with bootdelay=0)."""
         if self.at_prompt():
             return
-        human(msg)
+        self.ask_human(msg)
+        self.watch("等待板子启动到 U-Boot")
         deadline = time.time() + wait
         seen = bool(self.buf.strip())     # output already arrived during at_prompt(): the board is booting now
         while time.time() < deadline:
             if self._pump():
                 seen = True
+            if self.progress:
+                self.progress.waiting(self.wait_label if not seen else "正在打断 U-Boot 的自动启动")
             if seen:
                 self.send(" ")
                 if re.search(re.escape(PROMPT) + r"\s*$", self.buf):
@@ -351,11 +405,25 @@ class Console:
         raise BoardError("ping 主机失败：确认 USB 网卡接在 Carrier II 的 RJ45 口上，并且主机端 evk-direct 已经连上"
                          "（nmcli con show evk-direct）")
 
-    def tftp(self, addr: int, path: str, size: int) -> None:
-        out = self.cmd(f"tftpboot {addr:#x} {path}", timeout=max(60, size / 2e5))
+    bytes_per_hash = 10 * 1468      # U-Boot prints '#' every 10 blocks; CONFIG_TFTP_BLOCKSIZE 1468; recalibrated
+
+    def tftp(self, addr: int, path: str, size: int, base: int = 0, total: int | None = None) -> None:
+        if self.progress:
+            def tick():
+                loading = self.buf.split("Loading:", 1)
+                hashes = loading[1].count("#") if len(loading) == 2 else 0
+                self.progress.update(base + min(size, hashes * self.bytes_per_hash), total or size)
+            self.tick = tick
+        try:
+            out = self.cmd(f"tftpboot {addr:#x} {path}", timeout=max(60, size / 2e5))
+        finally:
+            self.tick = None
         m = re.search(r"Bytes transferred = (\d+)", out)
         if not m or int(m.group(1)) != size:
             raise BoardError(f"tftp {path}: {out[-300:]!r}")
+        hashes = out.split("Loading:", 1)[1].count("#") if "Loading:" in out else 0
+        if hashes >= 5:
+            self.bytes_per_hash = size / hashes
 
     def crc32(self, addr: int, size: int) -> int:
         out = self.cmd(f"crc32 {addr:#x} {size:#x}", timeout=60)
@@ -377,30 +445,48 @@ class Console:
         for i, c in enumerate(man["chunks"]):
             for attempt in range(3):
                 try:
-                    self.tftp(LOADADDR, f"{rel}/{c['file']}", c["bytes"])
+                    self.tftp(LOADADDR, f"{rel}/{c['file']}", c["bytes"], base=done, total=man["mapped_bytes"])
                     got = self.crc32(LOADADDR, c["bytes"])
                     if got != c["crc32"]:
                         raise BoardError(f"{c['file']}: crc32 {got:08x} != {c['crc32']:08x} after tftp")
                     break
                 except (BoardError, TimeoutError) as e:
-                    print(f"  {c['file']}: attempt {attempt + 1} failed: {e}")
+                    self.say(f"  {c['file']}: attempt {attempt + 1} failed: {e}")
                     if attempt == 2:
                         raise
             self.mmc_rw("write", LOADADDR, c["sector"], c["sectors"])
             done += c["bytes"]
             rate = done / max(time.time() - t0, 1e-3)
-            print(f"  [{i + 1}/{len(man['chunks'])}] {c['file']} -> sector {c['sector']:#x}  "
-                  f"{done / 2**20:.0f}/{man['mapped_bytes'] / 2**20:.0f} MiB  {rate / 2**20:.1f} MiB/s", flush=True)
-        print(f"write: done in {time.time() - t0:.0f}s")
+            line = (f"  [{i + 1}/{len(man['chunks'])}] {c['file']} -> sector {c['sector']:#x}  "
+                    f"{done / 2**20:.0f}/{man['mapped_bytes'] / 2**20:.0f} MiB  {rate / 2**20:.1f} MiB/s")
+            if self.progress:
+                self.progress.update(done, man["mapped_bytes"])
+                if not self.progress.tty:
+                    self.say(line)
+            else:
+                self.say(line)
+        if self.progress:
+            secs = max(time.time() - t0, 1e-3)
+            self.progress.finish(f"{man['mapped_bytes'] / 2**20:.0f} MiB，平均 {man['mapped_bytes'] / 2**20 / secs:.1f} MiB/s")
+        else:
+            self.say(f"write: done in {time.time() - t0:.0f}s")
         if verify:
             t1 = time.time()
-            for c in man["chunks"]:
+            if self.progress:
+                self.progress.start("verify")
+            for n, c in enumerate(man["chunks"], 1):
                 self.mmc_rw("read", LOADADDR, c["sector"], c["sectors"])
                 got = self.crc32(LOADADDR, c["bytes"])
                 if got != c["crc32"]:
                     raise BoardError(f"read-back of {c['file']} (sector {c['sector']:#x}): "
                                      f"crc32 {got:08x} != {c['crc32']:08x}")
-            print(f"verify: all {len(man['chunks'])} chunks read back with matching CRC32 ({time.time() - t1:.0f}s)")
+                if self.progress:
+                    self.progress.update(n, len(man["chunks"]), unit="块")
+            msg = f"verify: all {len(man['chunks'])} chunks read back with matching CRC32 ({time.time() - t1:.0f}s)"
+            if self.progress:
+                self.progress.finish(msg)
+            else:
+                self.say(msg)
 
     # ---- Linux on the board (serial console; the images have debug-tweaks: root without password) ----
     def linux_shell(self, wait: float) -> None:
@@ -410,8 +496,10 @@ class Console:
         try:
             i, _ = self.expect([SHELL_PROMPT, r"login: $", re.escape(PROMPT) + r"$"], 3)
         except TimeoutError:
-            human("给 EVK 上电（eMMC 启动：SW_MODE[1:3] = ON OFF OFF），工具会等到 Linux 的登录提示。")
+            self.ask_human("给 EVK 上电（eMMC 启动：SW_MODE[1:3] = ON OFF OFF），工具会等到 Linux 的登录提示。")
+            self.watch("等待 Linux 的登录提示")
             i, _ = self.expect([SHELL_PROMPT, r"login: $"], wait)
+            self.wait_label = None
         if i == 2:                                   # U-Boot prompt: boot with the default command
             self.send("boot\r")
             i, _ = self.expect([SHELL_PROMPT, r"login: $"], wait)
@@ -440,9 +528,11 @@ class Console:
         """reboot from the shell; seconds until the U-Boot banner, 'Starting kernel' and the login prompt."""
         self.buf = ""
         t0 = time.time()
+        self.watch("重启中")
         self.send("reboot\r")
         times = {}
         for key, rx in (("u_boot", r"U-Boot 20\d\d"), ("kernel", r"Starting kernel"), ("login", r"login: $")):
             self.expect([rx], timeout)
             times[key] = round(time.time() - t0, 1)
+        self.wait_label = None
         return times
