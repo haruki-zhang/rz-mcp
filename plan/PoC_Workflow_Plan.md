@@ -28,6 +28,7 @@ MCP 服务器的重心从"扩展寄存器覆盖"转向"服务 PoC 开发和 tick
 | 5 | 实验 1 回放 rzg3l-lowpower-display（原定 MultiCore-Display），Tesera 之后再做 | 见第 5、6 节 |
 | 6 | 第 1 步先用 in-your-own-words 复述并对齐，再用 sharpen 深化，得到两版设想；第 3 步为两版设想分别补全方案，交给单独的 Agent 比较、取长补短，融合版交给用户对齐 | 见第 3.1～3.3 节 |
 | 7 | 两个 skill 保持由用户手动调用 | 3.1.1 只作为备查，暂不实施 |
+| 9 | TFTP 和 NFS 走 USB 网卡，主机与 EVK 直连（方案 2）。网卡已经备好 | 见 7.3 |
 | 8 | 跳过实验 1，直接搭建流程 | 第 5 节暂缓，保留下来，以后可以作为回归测试。不再需要留出，过去的 G3L PoC 全部入库。改用第 7 节的组件级已知答案测试，再把第一个真实 PoC 当作验收 |
 
 ## 3. 六步工作流的分工
@@ -288,3 +289,30 @@ Tesera 是 RZ/G2L 客户板的 bring-up（`MACHINE=rzg2l-tlc-01`，VLP v4.0.2，
 - 脚本和模板放在 rz-mcp 的 `workflow/` 下，由 MCP 以 prompts 和 resources 的形式提供；
 - 子 Agent 的定义放在 `rzg3l-bsp-v1/.claude/agents/`，只在 Yocto 项目的会话中生效；
 - Tesera 属于 G2L，超出范围，暂不入库。
+
+### 7.3 B3 的网络：USB 网卡直连
+
+**已核实（2026-11-25）**
+
+- **网卡**：`enx207bd2aa6c7a`，ASIX AX88179 千兆网卡（驱动 `cdc_ncm`），MAC `20:7b:d2:aa:6c:7a`。系统已识别；没接板子时没有 carrier。
+- **主机的现状**：
+  - 只有 `enp1s0` 接公司内网，地址 10.166.35.229/22，默认路由走它；Docker 用的是 172.17.0.0/16；
+  - NetworkManager 在运行；
+  - 已装了 `dnsmasq-base`（NetworkManager 用的），没装 dnsmasq 服务和 NFS 服务；
+  - sudo 需要密码，所以安装和配置要由用户执行。
+- **官方 BSP 支持网络启动**：
+  - U-Boot：`smarc-rzg3l_defconfig`（@`16e6324c`）里开着 `DWC_ETH_QOS`（GBETH）、`RENESAS_RAVB` 和 `CMD_DHCP`；
+  - 内核：官方 defconfig（@`e6c894b7`）里开着 `STMMAC_ETH`、`DWMAC_RENESAS_GBETH`、`IP_PNP_DHCP`、`NFS_FS` 和 `ROOT_NFS`。
+- **例外**：rzg3l-fast-boot-seamless-logo 的 `fastboot.cfg` 为了缩短启动时间，关掉了 `STMMAC_ETH`。用了这个层的 PoC，Linux 里没有以太网，因此不能用 NFS root。这种情况下 U-Boot 的 TFTP 仍然可以用；rootfs 改走 SD 卡，或者加一个只在开发时使用的配置片段，重新打开以太网。这个片段不放进交付物。
+
+**方案**（B3 时实施）
+
+| 项目 | 设置 |
+|---|---|
+| 地址 | 主机这一侧固定为 192.168.50.1/24，EVK 由 DHCP 分配 192.168.50.100～150。不设网关，也不做 NAT：EVK 和公司网络互相不通。如果公司内网用到了 192.168.50.0/24，就换一个网段 |
+| 网卡配置 | 用 NetworkManager 为这块网卡建一个固定 IP 的配置：不作为默认路由，也不提供 DNS |
+| DHCP 和 TFTP | 用 dnsmasq 一个服务同时提供，只绑定这块网卡（`interface=` 加 `bind-dynamic`，插上网卡、有了地址才开始监听），`port=0` 不提供 DNS，以免和 systemd-resolved 冲突。TFTP 的根目录是 `/srv/tftp` |
+| NFS | 用 nfs-kernel-server。`/srv/nfs/<PoC>` 只开放给 192.168.50.0/24（rootfs 需要 `no_root_squash`） |
+| 防火墙 | ufw 如果是开启状态，只在这块网卡上放行 DHCP、TFTP 和 NFS |
+| 交付方式 | 提供一个可以重复执行、带撤销功能的脚本，由用户用 sudo 运行 |
+| 验证 | 在网卡有 carrier 时（接上 EVK 并上电）确认：各服务只在 192.168.50.1 上监听；EVK 的 U-Boot 能通过 `dhcp` 和 `tftpboot` 取得内核；Linux 能以 NFS root 启动 |
