@@ -126,6 +126,11 @@ def resolve_boot_files(target: str, deploy: Path, image: Path | None, cm33: str)
         if cm33 not in candidates:
             sys.exit(f"--cm33 {cm33}: not in {deploy} (candidates: {candidates})")
         chosen = cm33
+    elif head is not None and evk.raw_region(head, next(f.wic_sector for f in table if f.role == "cm33")):
+        sec = next(f.wic_sector for f in table if f.role == "cm33")
+        a, b = evk.raw_region(head, sec)       # e.g. the official wks: the boot partition starts at 4096
+        checks.append({"name": "cm33 from image", "result": "OK",
+                       "detail": f"image has no CM33 firmware (sector {sec} is inside the partition {a}..{b})"})
     elif head is not None:                 # the image says which CM33 firmware belongs to it
         sec = next(f.wic_sector for f in table if f.role == "cm33")
         for c in candidates:
@@ -154,7 +159,8 @@ def resolve_boot_files(target: str, deploy: Path, image: Path | None, cm33: str)
             sys.exit(f"{f.srec}: data starts at {lo:#x}, not at the program address {f.prog:#x}")
         if binf.exists() and binf.read_bytes() != data:
             sys.exit(f"{f.srec} does not match {binf.name}: files from different builds?")
-        if head is not None and f.wic_sector is not None:
+        embedded = head is not None and f.wic_sector is not None and not evk.raw_region(head, f.wic_sector)
+        if embedded:
             if head[f.wic_sector * 512:f.wic_sector * 512 + len(data)] != data:
                 sys.exit(f"{f.srec} differs from what the image embeds at sector {f.wic_sector}: "
                          "bootloader and rootfs are from different builds")
@@ -168,7 +174,7 @@ def resolve_boot_files(target: str, deploy: Path, image: Path | None, cm33: str)
             where = f"QSPI {f.dest:#x}..{end - 1:#x}"
         if end > limit:
             sys.exit(f"{f.srec} ({len(data)} bytes, {where}) overlaps the next file or the end of the medium")
-        same = " = image" if head is not None and f.wic_sector is not None else ""
+        same = " = image" if embedded else ""
         checks.append({"name": f"{f.role} {f.srec}", "result": "OK",
                        "detail": f"{len(data)} bytes, {where}, load {f.prog:#x}, = {binf.name if binf.exists() else 'srec'}{same}"})
         print(f"check: {f.srec}: {len(data)} bytes -> {where}, load {f.prog:#x}{', equals .bin' if binf.exists() else ''}{same}")

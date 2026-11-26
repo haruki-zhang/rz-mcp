@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+"""Follow the board job that is running now and print one line per event (for the agent's Monitor, or a terminal).
+
+    workflow/board/evk-watch [--wait 120] [--quiet]
+    workflow/board/evk-watch --status
+
+Every tool or script that drives the EVK through evk.Console (evk-flash, evk-verify, a PoC's own board scripts)
+registers itself in data/board-runs/active.json and records its events next to its status.json. evk-watch takes
+the job that is active now, or waits up to --wait seconds for one to start, prints its events from the beginning
+and exits when the job ends:
+
+    >>> 需要你操作：…      something only a person can do: pass it on word for word. The tool sees on the
+                           console when it is done; nobody has to answer in the chat
+    ✓ 检测到板子有输出     that action is done
+    [i/n] 标题             a step starts;  ✓ / ✗ 标题 — summary: it ended
+    • …                    a board milestone (BootROM, BL2, U-Boot, kernel, login prompt)
+    完成：… / 失败：…      the end
+
+Exit status: 0 the job ended well (or exited without reporting a result: read its own output), 1 it failed,
+2 no job started within --wait, or its process went away without closing the job.
+--quiet prints only what needs attention: persons needed, failed steps, the end.
+--status prints the current state of the active (else the latest) job and exits.
+"""
+import argparse
+import json
+import sys
+import time
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import progress  # noqa: E402
+
+
+def line(e: dict, quiet: bool) -> str | None:
+    k = e["kind"]
+    if k == "human":
+        return f">>> 需要你操作：{e['msg']}"
+    if k == "end":
+        if e.get("ok") is None:
+            return f"结束：{e.get('msg', '')}"
+        return f"{'完成' if e['ok'] else '失败'}：{e.get('msg', '')}" + \
+            (f"（总计 {progress.fmt_time(e['seconds'])}）" if e.get("seconds") is not None else "")
+    if k == "finish" and not e.get("ok", True):
+        return f"  ✗ {e['title']}" + (f" — {e['summary']}" if e.get("summary") else "")
+    if quiet:
+        return None
+    if k == "human_done":
+        return f"  ✓ {e['what']}"
+    if k == "start":
+        return f"[{e['i']}/{e['n'] or '?'}] {e['title']}" + (f"  {e['detail']}" if e.get("detail") else "")
+    if k == "finish":
+        return f"  ✓ {e['title']}（{progress.fmt_time(e.get('seconds'))}）" + (f" — {e['summary']}" if e.get("summary") else "")
+    if k == "milestone":
+        return f"  • {e['text']}"
+    if k == "waiting":
+        return f"  等待：{e['what']}"
+    return None                                        # notes: too many; they are in the job's own output
+
+
+def status() -> int:
+    j = progress.active()
+    if not j:
+        try:
+            j = {**json.loads(progress.last_path().read_text()), "alive": False, "last": True}
+        except (OSError, ValueError):
+            print("没有上板任务的记录")
+            return 2
+    print(f"任务：{j['command']}" + ("（已结束）" if j.get("last") else "" if j["alive"] else "（进程已经不在了）"))
+    print(progress.describe(json.loads(Path(j["status"]).read_text())))
+    return 0
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--wait", type=float, default=120, help="seconds to wait for a job to start")
+    ap.add_argument("--quiet", action="store_true")
+    ap.add_argument("--status", action="store_true")
+    a = ap.parse_args()
+    if a.status:
+        sys.exit(status())
+    t0 = time.time()
+    job = None
+    while time.time() - t0 < a.wait:
+        j = progress.active()
+        if j and j["alive"]:
+            job = j
+            break
+        time.sleep(0.3)
+    if not job:
+        print(f"没有正在运行的上板任务（等了 {a.wait:.0f} 秒）", flush=True)
+        sys.exit(2)
+    print(f"跟踪上板任务：{job['command']}", flush=True)
+    events, pos, gone_since = Path(job["events"]), 0, None
+    while True:
+        if events.exists():
+            with open(events, encoding="utf-8") as f:
+                f.seek(pos)
+                while True:
+                    raw = f.readline()
+                    if not raw.endswith("\n"):
+                        break                       # a partly written line: read it next time
+                    pos = f.tell()
+                    e = json.loads(raw)
+                    out = line(e, a.quiet)
+                    if out:
+                        print(out, flush=True)
+                    if e["kind"] == "end":
+                        sys.exit(1 if e.get("ok") is False else 0)
+        if not progress.pid_alive(job["pid"]):
+            gone_since = gone_since or time.time()
+            if time.time() - gone_since > 2:        # give the exit handler time to write the last event
+                print(f"任务的进程已经不在了，没有写出结果（被强行结束？）：看它自己的输出和 {job.get('log') or job['status']}", flush=True)
+                sys.exit(2)
+        time.sleep(0.5)
+
+
+if __name__ == "__main__":
+    main()

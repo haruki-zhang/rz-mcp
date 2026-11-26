@@ -25,6 +25,7 @@ CMDS = {"uname -r": ("6.12.46-cip8-yocto-standard", 0),
         "ip -4 -o addr show eth0": ("2: eth0    inet 192.168.50.123/24 brd 192.168.50.255 scope global eth0", 0),
         "cat /proc/cmdline": ("rw rootwait root=/dev/mmcblk0p2", 0),
         "false": ("", 1),
+        "printf mac": ("02:00:00:00:00:10", 0, True),          # no final newline, like busybox hexdump -e (evk-mac S0)
         "ip -4 -o addr show evil": ("2: evil    inet 1.2.3.4;touch_/tmp/verify-tests/pwned/24", 0)}
 
 PLAN = '''
@@ -68,6 +69,14 @@ expect = ""
 expect_rc = 1
 
 [[check]]
+id = "V-7"
+title = "output without a final newline still ends the command"
+where = "linux"
+run = "printf mac"
+expect = "^02:00:00:00:00:10$"
+timeout = 5
+
+[[check]]
 id = "V-6"
 title = "boot time"
 where = "boot"
@@ -98,7 +107,9 @@ rc, out = run(p, f)
 rep = (p / "design" / "03-verification.md").read_text()
 res = json.loads(next((p / "design" / "verify-logs").glob("*/results.json")).read_text())["results"]
 by = {r["id"]: r for r in res}
-check(rc == 1 and "1 项未通过（5/6）" in rep, f"one failing check -> exit 1, report says 5/6 ({out[-300:]})")
+check(rc == 1 and "1 项未通过（6/7）" in rep, f"one failing check -> exit 1, report says 6/7 ({out[-300:]})")
+check(by["V-7"]["pass"] and by["V-7"]["output"] == "02:00:00:00:00:10",
+      f"output without a final newline: the command ends, output intact ({by['V-7'].get('observed')})")
 check(by["V-1"]["pass"] and by["V-2"]["pass"] and by["V-5"]["pass"], "linux checks: regex, capture, expected exit status")
 check(by["V-2"]["captured"] == {"ip": "192.168.50.123"} and by["V-3"]["pass"] and by["V-3"]["command"] == "echo reach 192.168.50.123",
       "a value captured on the board is used in a host command")

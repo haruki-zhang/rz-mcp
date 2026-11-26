@@ -42,9 +42,24 @@ RULES = """\
 
 - `/in-your-own-words` 和 `/sharpen` 只能由用户手动输入。不要代替它们，也不要自己写复述或深化来替代。
 - 每完成一步，在 PoC 仓库里执行一次 `git commit`，提交说明里写明是第几步。
+- **命令都由你来运行，不要让用户把命令贴到终端里执行。** 耗时的（构建、上板）用后台模式。只有拨码、上电或断电、按 RESET、插拔 SD 卡和网线，以及需要 sudo 的命令（例如 `setup-host.sh`、用 bmaptool 写 SD 卡），才请用户来做；要用户执行 sudo 命令时，先说明它做什么。
 - 构建只能由主会话执行；同一个 Yocto 项目里同一时间只跑一个 bitbake（项目里的 PoC 共用一个构建目录）。执行前先告诉用户要构建什么、大约需要多久。
 - 所有命令都带着 `--project {project}`，不要省略：这个 PoC 的 Yocto 项目就是它。调用 MCP 的 `get_bsp_release`、`bsp_source`、`bsp_grep`、`patch_stack`、`check_build_env` 时，也把它作为 `project` 参数传入。
 - 只针对 RZ/G3L。流程的定义见 `{plan}` 第 3 节。"""
+
+
+BOARD_RULES = """\
+## 上板的做法（第 2～6 步所有接触 EVK 的命令都一样）
+
+用户只做物理操作，命令都由你运行。上板命令包括 `evk-flash`、`evk-verify`，以及 PoC 自己写的上板脚本（例如设计里的 Step 0 实验、U-Boot 阶段的检查）。
+
+1. 用后台模式启动上板命令（Bash 的 `run_in_background`）。
+2. **紧接着**用 Monitor 运行 `/usr/bin/python3 {board}/evk-watch`。它跟踪当前占用串口的任务，每个事件输出一行，任务结束时自己退出（0 成功，1 失败，2 没有任务或进程意外退出）：
+   - `>>> 需要你操作：…`：**马上原样转告用户**（拨码、上电、按 RESET 等）。用户不需要在对话里回复：工具从串口上看到板子有输出，就知道操作完成了，会接着做；
+   - `✗ …`、`失败：…`：读那次运行的日志和报告找原因，修好后重新运行；
+   - 用户问进度时，运行 `/usr/bin/python3 {board}/evk-watch --status`。
+3. 串口同一时间只能有一个任务使用。等 evk-watch 退出之后，再启动下一个上板任务；不要另开 minicom 之类的程序。
+4. PoC 自己的上板脚本：用 `{board}/evk.py` 的 `Console` 打开串口；需要人操作时调用 `ask_human("…")`，写明拨码的具体位置和要做的动作；结束时调用 `result(ok, "…")`。这样 evk-watch 就能转发提示、报告结果，不需要另外做什么。上板之前，先用假板子 `{eval}/fake_uboot.py` 把脚本测一遍。"""
 
 
 def project_dir() -> Path:
@@ -207,6 +222,7 @@ def later_steps(name: str, repo: Path, s: dict, project: Path) -> str:
 ## 下一步：实现（第 5 步）
 
 还缺：{"、".join(missing)}。按 `01-design.md` 第 5 节（改动清单）和第 10 节（PoC 步骤）实现。所有改动都放在本 PoC 仓库自己的层里，不要改 BSP，也不要改其他 PoC 的层。
+第 10 节里有上板实验（例如 Step 0）的，按下面"上板的做法"由你在后台运行，不要交给用户执行。
 
 1. **构建配置**
    - 如果本 PoC 基于当前的构建配置（例如已有的 combo），先运行 `python3 {BUILD}/poc-use --capture {repo} --project {project}`，它会生成 `build-conf/layers` 和 `build-conf/local.conf`；
@@ -248,8 +264,7 @@ def later_steps(name: str, repo: Path, s: dict, project: Path) -> str:
 2. 选择写入方式：
    - 只改了内核或 rootfs：`evk-flash rootfs --image {deploy}/{s['wic']}`；
    - 改了 BL2、FIP 或 CM33 固件：`evk-flash emmc --image {deploy}/{s['wic']}`。
-3. 在后台运行。看到 `>>> 需要你操作` 时，把内容原样转告用户（拨码、上电等）。
-   用户问进度时，运行 `/usr/bin/python3 {BOARD}/evk-flash status`，它会给出当前步骤、百分比、剩余时间，以及是否在等人操作。如果用户自己在终端里运行，进度会在终端里实时显示。
+3. 按下面"上板的做法"运行：后台启动 evk-flash，紧接着用 Monitor 跟踪 `evk-watch`，看到 `>>> 需要你操作` 就转告用户。
 4. 写入成功后，再次运行 `/rz-docs:poc {name}`。"""
     if not s["verified"]:
         fail = ("\n上一次验证有未通过的项，见 `design/03-verification.md`。向用户逐项说明，按用户的决定处理："
@@ -264,7 +279,8 @@ def later_steps(name: str, repo: Path, s: dict, project: Path) -> str:
    - 每一项都要写 `where` 和 `run`，以及 `expect`（或者 `boot` 类型的 `max_seconds`）；
    - 能在主机上客观判定的项，用 `where = "host"`，例如 ping 板子；
    - 写完删掉第一行的标记，然后提交。
-2. 运行 `/usr/bin/python3 {BOARD}/evk-verify {repo} --project {project}`。它会生成 `design/03-verification.md`，原始日志放在 `design/verify-logs/`。
+2. 按下面"上板的做法"在后台运行 `/usr/bin/python3 {BOARD}/evk-verify {repo} --project {project}`，用 Monitor 跟踪 `evk-watch --quiet`（只报告未通过的项和最终结果）。它会生成 `design/03-verification.md`，原始日志放在 `design/verify-logs/`。
+   U-Boot 阶段的检查（evk-verify 还不支持）写成 PoC 自己的上板脚本，同样在后台运行。
 3. 全部通过的话，提交，然后再次运行 `/rz-docs:poc {name}`。"""
     if not s["package"]:
         return f"""\
@@ -383,6 +399,7 @@ def poc_prompt(name: str, project_arg: str = "") -> str:
                   f"\n| 5 | tag `release-v1` | 交付完成 | {mark(s['release'])} |")
     label = {"absent": "还没有搭建", "incomplete": "搭建" + ("进行中" if a["running"] else "没有完成"),
              "usable": "可用", "unusable": "不可用"}[a["state"]]
+    board_rules = ("\n" + BOARD_RULES.format(board=BOARD, eval=ROOT / "eval") + "\n") if all(done[f] for f in STEP1) else ""
     nxt = env_step(name, project, a, done, explicit)
     if nxt is None:
         nxt = next_step(name, repo, project, done)
@@ -402,4 +419,4 @@ def poc_prompt(name: str, project_arg: str = "") -> str:
 {nxt}
 
 {RULES.format(plan=ROOT / "plan" / "PoC_Workflow_Plan.md", project=project)}
-"""
+{board_rules}"""

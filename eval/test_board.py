@@ -61,6 +61,42 @@ def synthetic_image(path: Path, fip: bytes, cm33: bytes, bs=4096, size=8 << 20) 
     return path
 
 
+def mbr(parts: list[tuple[int, int, int]]) -> bytes:
+    """A 512-byte MBR with (type, first sector, sectors) entries."""
+    import struct
+    b = bytearray(512)
+    for i, (typ, start, n) in enumerate(parts):
+        b[446 + 16 * i + 4] = typ
+        b[446 + 16 * i + 8:446 + 16 * i + 16] = struct.pack("<II", start, n)
+    b[510:512] = b"\x55\xaa"
+    return bytes(b)
+
+
+def partitioned_image(path: Path, part1: int, fip: bytes, at4992: bytes) -> Path:
+    """An image with an msdos table whose first partition starts at `part1`, the fip at 768s, `at4992` at 4992s."""
+    img = bytearray(4 << 20)
+    img[0:512] = mbr([(0x0C, part1, 8192), (0x83, part1 + 8192, 4096)])
+    img[768 * 512:768 * 512 + len(fip)] = fip
+    img[4992 * 512:4992 * 512 + len(at4992)] = at4992
+    with gzip.open(path, "wb") as f:
+        f.write(img)
+    return path
+
+
+def boot_files(image: Path):
+    """resolve_boot_files of evk-flash: (roles, checks, exit message or None)."""
+    import importlib.machinery
+    import importlib.util
+    loader = importlib.machinery.SourceFileLoader("evk_flash", str(TOOL))
+    mod = importlib.util.module_from_spec(importlib.util.spec_from_loader("evk_flash", loader))
+    loader.exec_module(mod)
+    try:
+        files, checks = mod.resolve_boot_files("emmc", DEPLOY, image, "auto")
+        return [f.role for f in files], checks, None
+    except SystemExit as e:
+        return None, None, str(e)
+
+
 def user_area_matches(sd: Path, image: Path) -> bool:
     bm = evk.read_bmap(Path(str(image).replace(".wic.gz", ".wic.bmap")))
     with open(sd, "rb") as f:
@@ -122,6 +158,28 @@ def main():
     img = synthetic_image(WORK / "syn.rootfs.wic.gz", fip, cm33)
     other = synthetic_image(WORK / "other-build.rootfs.wic.gz", fip[:-1] + bytes([fip[-1] ^ 1]), cm33)
     deploy = ["--deploy", str(DEPLOY)]
+
+    # ---- which raw firmware an image embeds: only what lies outside its partitions (evk-mac, 2026-11-26)
+    junk = random.Random(3).randbytes(8192)
+    roles, checks, err = boot_files(partitioned_image(WORK / "official-like.wic.gz", 4096, fip, junk))
+    check(err is None and roles == ["bl2", "fip"] and any("inside the partition 4096.." in c["detail"] for c in checks),
+          f"official layout (boot partition at 4096s): sector 4992 is partition data, no CM33, no --cm33 none ({err})")
+    check(err is None and any(c["name"].startswith("fip") and "= image" in c["detail"] for c in checks),
+          "official layout: the fip at 768s (before the partitions) is still cross-checked")
+    roles, checks, err = boot_files(partitioned_image(WORK / "lpdemo-like.wic.gz", 6144, fip, cm33))
+    check(err is None and roles == ["bl2", "fip", "cm33"], f"lpdemo layout (partition at 6144s): the CM33 at 4992s is picked ({err})")
+    roles, checks, err = boot_files(partitioned_image(WORK / "unknown-fw.wic.gz", 6144, fip, junk))
+    check(roles is None and "embeds a CM33 firmware" in err, "raw data at 4992s matching no CM33 candidate is still refused")
+    import struct
+    g = bytearray(64 * 1024)
+    g[0:512] = mbr([(0xEE, 1, 0xFFFFFFFF)])
+    g[512:520] = b"EFI PART"
+    g[512 + 72:512 + 88] = struct.pack("<QII", 2, 4, 128)
+    g[1024:1040] = b"\x01" * 16
+    g[1024 + 32:1024 + 48] = struct.pack("<QQ", 4096, 49151)
+    check(evk.wic_partitions(bytes(g)) == [(4096, 49151)] and evk.raw_region(bytes(g), 4992) == (4096, 49151)
+          and evk.raw_region(bytes(g), 768) is None, "GPT behind a protective MBR is read the same way")
+    check(evk.wic_partitions(random.Random(7).randbytes(4096)) == [], "no 55aa signature: no partition table, old behaviour")
 
     # ---- doctor (writes nothing)
     f = board("doctor")

@@ -1,16 +1,76 @@
-"""Progress and state display for evk-flash / evk-verify (stdlib only).
+"""Progress and state display for every board job: evk-flash, evk-verify, and a PoC's own scripts (stdlib only).
 
 On a terminal: one live line (step, bar, bytes, rate, time left for the step and for the whole run) that is
 redrawn in place; finished steps and board milestones are printed above it. When stdout is not a terminal (the
 agent runs the tool in the background, or output goes to a file): no redraws, a line at each step and every 10 %
 or 30 s. Either way the current state is written to status.json, which `evk-flash status` prints.
+
+Each event (step started / finished, board milestone, a person needed, the end) is also appended to
+<status>.events.jsonl, and the job that holds the real EVK console registers itself in data/board-runs/active.json.
+workflow/board/evk-watch follows that job and prints one line per event, so the agent can run board jobs in the
+background and still pass ">>> 需要你操作" on to the user. A job that exits without end() is closed at exit:
+"failed" after an uncaught exception, otherwise "exited" (no result reported).
 """
+import atexit
 import json
 import os
 import shutil
 import sys
 import time
 from pathlib import Path
+
+RZ = Path(__file__).resolve().parent.parent.parent
+
+
+# ---------------------------------------------------------------- the active board job (one console, one job)
+
+def active_path() -> Path:
+    return Path(os.environ.get("RZ_BOARD_ACTIVE", RZ / "data" / "board-runs" / "active.json"))
+
+
+def last_path() -> Path:
+    return active_path().with_name("last.json")
+
+
+def pid_alive(pid: int) -> bool:
+    """The process exists and has not exited (a zombie, exited but not yet reaped by its parent, counts as gone)."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+        return stat[stat.rindex(")") + 2] != "Z"
+    except (OSError, ValueError, IndexError):
+        return True
+
+
+def active() -> dict | None:
+    """The registered job, with "alive" (its process still exists); None if nothing is registered."""
+    try:
+        j = json.loads(active_path().read_text())
+    except (OSError, ValueError):
+        return None
+    j["alive"] = pid_alive(j.get("pid", -1))
+    return j
+
+
+def events_path(status_path: Path) -> Path:
+    return status_path.with_name(status_path.stem + ".events.jsonl")
+
+
+_last_exc: list = []
+
+
+def _excepthook(tp, val, tb):
+    _last_exc[:] = [f"{tp.__name__}: {val}"]
+    _orig_excepthook(tp, val, tb)
+
+
+_orig_excepthook = sys.excepthook
+sys.excepthook = _excepthook
 
 
 def cols(s: str) -> int:
@@ -54,6 +114,7 @@ class Progress:
         self.i = 0
         self.key = self.title = self.detail = ""
         self.step_t0 = self.t0
+        self.bar_t0 = None                  # status.json can be written before the first step (register)
         self.done = self.total = 0
         self.unit = "B"
         self.state = "running"
@@ -63,6 +124,52 @@ class Progress:
         self.last_line = self.last_status = 0.0
         self.last_pct = -1
         self._live = False
+        self.events = events_path(status_path) if status_path else None
+        self.registered = False
+        if status_path:
+            atexit.register(self._at_exit)
+
+    # ------------------------------------------------------------ the job record
+    def register(self, **info) -> None:
+        """Make this the active board job (called by evk.Console when it holds the real console)."""
+        if not self.status_path or self.registered:
+            return
+        f = active_path()
+        f.parent.mkdir(parents=True, exist_ok=True)
+        rec = {"status": str(self.status_path), "events": str(self.events), "pid": os.getpid(),
+               "started": time.strftime("%Y-%m-%dT%H:%M:%S"), "command": " ".join(sys.argv), **info}
+        tmp = f.with_suffix(".tmp")
+        tmp.write_text(json.dumps(rec, ensure_ascii=False, indent=1))
+        tmp.replace(f)
+        self.registered = True
+        self._status(force=True)
+
+    def unregister(self) -> None:
+        if not self.registered:
+            return
+        j = active()
+        if j and j.get("status") == str(self.status_path) and j.get("pid") == os.getpid():
+            j.pop("alive", None)
+            last_path().write_text(json.dumps(j, ensure_ascii=False, indent=1))    # for evk-watch --status
+            active_path().unlink(missing_ok=True)
+        self.registered = False
+
+    def _at_exit(self) -> None:
+        if self.state in ("running", "waiting_for_human"):
+            if _last_exc:
+                self.end(False, f"脚本异常退出：{_last_exc[0]}")
+            else:
+                self.state = "exited"
+                self._event("end", ok=None, msg="进程已退出，没有报告结果（结论看它自己的输出和退出码）")
+                self._status(force=True, extra={"message": "进程已退出，没有报告结果"})
+        self.unregister()
+
+    def _event(self, kind: str, **kw) -> None:
+        if not self.events:
+            return
+        rec = {"t": time.strftime("%Y-%m-%dT%H:%M:%S"), "kind": kind, **kw}
+        with open(self.events, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
     # ------------------------------------------------------------ plan and steps
     def set_plan(self, plan: list[tuple[str, str, float]]) -> None:
@@ -81,6 +188,7 @@ class Progress:
         self.wait_what = None
         self._print(f"{self._c('1')}[{self.i}/{len(self.plan) or '?'}] {self.title}{self._c('0')}" +
                     (f"  {self._c('2')}{detail}{self._c('0')}" if detail else ""))
+        self._event("start", i=self.i, n=len(self.plan), title=self.title, detail=detail)
         self._status(force=True)
 
     def finish(self, summary: str = "", ok: bool = True) -> None:
@@ -88,15 +196,18 @@ class Progress:
         mark = f"{self._c('32')}✓{self._c('0')}" if ok else f"{self._c('31;1')}✗{self._c('0')}"
         self._print(f"  {mark} {self.title}  {self._c('2')}({fmt_time(took)})" +
                     (f"  — {summary}" if summary else "") + self._c('0'))
+        self._event("finish", title=self.title, ok=ok, summary=summary, seconds=round(took, 1))
         self.done = self.total = 0
         self.wait_what = None
         self._status(force=True)
 
     def milestone(self, text: str) -> None:
         self._print(f"  {self._c('36')}•{self._c('0')} {text}  {self._c('2')}(+{fmt_time(time.time() - self.step_t0)}){self._c('0')}")
+        self._event("milestone", text=text)
 
     def note(self, text: str) -> None:
         self._print(f"  {text}")
+        self._event("note", text=text)
 
     # ------------------------------------------------------------ bars and waits
     def update(self, done: float, total: float, unit: str = "B") -> None:
@@ -123,6 +234,7 @@ class Progress:
             self.wait_what, self.wait_t0 = what, now
             if not self.tty:
                 self._print(f"  等待：{what}")
+            self._event("waiting", what=what)
             self.last_line = now
         elapsed = now - self.wait_t0
         if self.tty and now - self.last_line > 0.25:
@@ -141,12 +253,14 @@ class Progress:
         bell = "\a" if self.tty else ""
         body = "\n".join("│ " + l for l in wrap(f">>> 需要你操作：{msg}", width - 2))
         self._print(f"{bell}{self._c('33;1')}┌{line}\n{body}\n└{line}{self._c('0')}")
+        self._event("human", msg=msg)
         self._status(force=True)
 
     def human_done(self, what: str = "检测到板子有输出") -> None:
         if self.state == "waiting_for_human":
             self.state, self.human_msg = "running", None
             self._print(f"  {self._c('32')}✓{self._c('0')} {what}")
+            self._event("human_done", what=what)
             self._status(force=True)
 
     def end(self, ok: bool, msg: str = "") -> None:
@@ -154,7 +268,9 @@ class Progress:
         self.wait_what = self.human_msg = None
         self._print(("" if ok else self._c('31')) + f"{'完成' if ok else '失败'}：{msg}" + self._c('0') +
                     f"  （总计 {fmt_time(time.time() - self.t0)}）")
+        self._event("end", ok=ok, msg=msg, seconds=round(time.time() - self.t0, 1))
         self._status(force=True, extra={"message": msg})
+        self.unregister()
 
     # ------------------------------------------------------------ rendering
     def eta_total(self) -> float | None:
@@ -228,7 +344,7 @@ class Progress:
 
 def describe(st: dict) -> str:
     """One status.json, for `evk-flash status`."""
-    lines = [f"状态：{ {'running': '进行中', 'waiting_for_human': '等你操作', 'done': '已完成', 'failed': '失败'}.get(st['state'], st['state']) }"
+    lines = [f"状态：{ {'running': '进行中', 'waiting_for_human': '等你操作', 'done': '已完成', 'failed': '失败', 'exited': '进程已退出（没有报告结果）'}.get(st['state'], st['state']) }"
              f"  （已运行 {fmt_time(st['elapsed_s'])}，更新于 {st['updated']}）",
              f"步骤：[{st['step']}/{st['steps']}] {st['title']}" + (f"  {st['detail']}" if st.get("detail") else "")]
     if st.get("human"):

@@ -7,11 +7,18 @@ Output formats are matched against the sources the BSP uses:
   BootROM and Flash Writer: Linux Start-up Guide R01US0858EJ0100 Rev.1.00-rc1, sections 4.3, 4.4 and 8.2
   ("please send !", "Flash writer for RZ/G3L", SUP, EM_W, em_secsd).
 Needs pyserial (system python3 has it).
+
+A script that opens the console (Console) is a board job: evk-watch can follow it. If the script sets no
+progress.Progress of its own, the first output from the board creates one for the process: <log>.status.json and
+<log>.status.events.jsonl next to the log (or data/board-runs/<time>-<script>/ without a log). Holding the real
+console registers the job in data/board-runs/active.json; ask_human() is what evk-watch passes on to the user.
 """
 import gzip
 import hashlib
 import json
+import os
 import re
+import struct
 import sys
 import time
 import xml.etree.ElementTree as ET
@@ -19,6 +26,9 @@ import zlib
 from pathlib import Path
 
 import serial
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import progress as _progress  # noqa: E402
 
 PROMPT = "=> "
 SHELL_PROMPT = r"root@[\w.-]+:[^\n]*# $"   # debug-tweaks images log root in without a password
@@ -37,6 +47,23 @@ def human(msg: str) -> None:
 
 class BoardError(RuntimeError):
     pass
+
+
+_AUTO: "_progress.Progress | None" = None     # the per-process Progress of a script that set none
+
+
+def _auto_progress(log: str | None) -> "_progress.Progress":
+    global _AUTO
+    if _AUTO is None:
+        if log:
+            status = Path(log).with_suffix(".status.json")
+        else:
+            d = _progress.RZ / "data" / "board-runs" / f"{time.strftime('%Y%m%d-%H%M%S')}-{Path(sys.argv[0]).stem or 'script'}"
+            d.mkdir(parents=True, exist_ok=True)
+            status = d / "status.json"
+        _AUTO = _progress.Progress(status)
+        _AUTO.set_plan([])
+    return _AUTO
 
 
 # ---------------------------------------------------------------- files on the host
@@ -87,6 +114,38 @@ def wic_read(image: Path, offset: int, length: int) -> bytes:
     with gzip.open(image, "rb") as f:
         f.read(offset)
         return f.read(length)
+
+
+def wic_partitions(head: bytes) -> list[tuple[int, int]]:
+    """(first, last) sector of every partition in a WIC's MBR, or GPT behind a protective MBR; [] without a
+    partition table. `head` is the start of the image (wic_read); GPT entries beyond it are not seen."""
+    if len(head) < 512 or head[510:512] != b"\x55\xaa":
+        return []
+    out = []
+    for i in range(4):
+        e = head[446 + 16 * i:462 + 16 * i]
+        start, size = struct.unpack("<II", e[8:16])
+        if e[4] == 0xEE:                                     # protective MBR: the table is the GPT at LBA 1
+            h = head[512:1024]
+            if h[:8] != b"EFI PART":
+                return []
+            lba, n, esz = struct.unpack("<QII", h[72:88])
+            for k in range(n):
+                o = lba * SECTOR + k * esz
+                if o + esz > len(head):
+                    break
+                ent = head[o:o + esz]
+                if ent[:16].strip(b"\0"):
+                    out.append(struct.unpack("<QQ", ent[32:48]))
+            return out
+        if e[4] and size:
+            out.append((start, start + size - 1))
+    return out
+
+
+def raw_region(head: bytes, sector: int) -> tuple[int, int] | None:
+    """None if `sector` lies outside every partition (where a wks places raw firmware), else that partition."""
+    return next(((a, b) for a, b in wic_partitions(head) if a <= sector <= b), None)
 
 
 def stage_image(image: Path, bmap_path: Path, stage: Path, chunk_bytes: int) -> dict:
@@ -140,12 +199,31 @@ class Console:
             raise BoardError(f"cannot open {port}: {e} (另一个工具或终端程序正在使用串口？)") from e
         self.buf = ""
         self.echo = echo
-        self.progress = None          # progress.Progress, set by the caller
+        self.port = port
+        self.log_path = log
+        # registered as the active board job only on the real console (a test's fake board is a pty), or when
+        # RZ_BOARD_ACTIVE points the registry somewhere else (tests)
+        self.registers = bool(os.environ.get("RZ_BOARD_ACTIVE")) or os.path.realpath(port) == os.path.realpath(PORT)
+        self._progress = None         # progress.Progress, set by the caller (else created at the first output)
         self.tick = None              # called while waiting (live progress)
         self.wait_label = None        # what we are waiting for (shown with the elapsed time)
         self.seen = set()             # milestones already shown
         self.recent = ""
         self.log = open(log, "a", encoding="utf-8", errors="replace") if log else None
+
+    @property
+    def progress(self):
+        return self._progress
+
+    @progress.setter
+    def progress(self, p) -> None:
+        self._progress = p
+        if p is not None and self.registers:
+            p.register(port=self.port, log=self.log_path)
+
+    def _ensure_progress(self) -> None:
+        if self._progress is None:
+            self.progress = _auto_progress(self.log_path)
 
     def close(self) -> None:
         self.ser.close()
@@ -159,6 +237,7 @@ class Console:
         data = self.ser.read(65536)
         if not data:
             return False
+        self._ensure_progress()
         s = data.decode("utf-8", "replace").replace("\r\n", "\n").replace("\r", "\n")
         self.buf += s
         if self.progress:
@@ -179,16 +258,20 @@ class Console:
         return True
 
     def say(self, text: str) -> None:
-        if self.progress:
-            self.progress.note(text)
-        else:
-            print(text, flush=True)
+        self._ensure_progress()
+        self.progress.note(text)
 
     def ask_human(self, msg: str) -> None:
-        if self.progress:
-            self.progress.human(msg)
-        else:
-            human(msg)
+        """Something only a person can do (switches, power, RESET, cards, cables). Printed loudly and recorded as
+        an event: evk-watch passes it on. The board's next output marks it done."""
+        self._ensure_progress()
+        self.progress.human(msg)
+
+    def result(self, ok: bool, msg: str = "") -> None:
+        """End the job with its result (evk-watch prints it and exits). Optional: without it the job is closed
+        when the process exits, as failed after an uncaught exception, else with no result."""
+        self._ensure_progress()
+        self.progress.end(ok, msg)
 
     def watch(self, label: str | None) -> None:
         """Show milestones again from here on (a new boot), and what we are waiting for."""
@@ -515,10 +598,13 @@ class Console:
             raise BoardError("the image asks for a password: evk-verify needs an image with debug-tweaks")
 
     def linux_cmd(self, cmd: str, timeout: float = 30) -> tuple[int, str]:
-        """Run a shell command; return (exit status, output). The end is found by a marker with the status."""
+        """Run a shell command; return (exit status, output). The end is found by a marker with the status.
+
+        The marker is printed on a line of its own (printf starts it with a newline), so output that does not end
+        in a newline (busybox `hexdump -e`, `printf`) still ends the command; the extra blank line is stripped."""
         mark = f"__RZ{int(time.time() * 1000) % 100000:05d}__"
         self.buf = ""
-        self.send(f"{cmd}; echo {mark}$?\r")
+        self.send(f"{cmd}; printf '\\n%s%d\\n' {mark} $?\r")
         _, text = self.expect([rf"\n{mark}(\d+)\s*\n[\s\S]*?{SHELL_PROMPT}"], timeout)
         m = re.search(rf"\n{mark}(\d+)", text)
         body = text[:m.start()]

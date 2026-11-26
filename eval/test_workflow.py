@@ -48,7 +48,7 @@ W.Y.assess = lambda p, *a, **k: {"project": str(p), "release": "RZG3L-BSP-1.0.0"
 D = new / "design"
 def stage(name="lowpower-display"):
     m = re.search(r"^## (.+)$", W.poc_prompt(name).split("当前状态")[0] if False else W.poc_prompt(name).split("\n## 始终遵守")[0], re.M)
-    heads = [l for l in W.poc_prompt(name).splitlines() if l.startswith("## ") and "始终遵守" not in l]
+    heads = [l for l in W.poc_prompt(name).splitlines() if l.startswith("## ") and "始终遵守" not in l and "上板的做法" not in l]
     return heads[-1] if heads else ""
 def fill(f):
     p = D / f; t = p.read_text().split("\n", 1)[1] if p.exists() else "# written by agent\n"; p.write_text(t + "\n(filled by test)\n")
@@ -58,6 +58,10 @@ fill("00-request.md");  check("复述与对齐" in stage(), "after 00 -> restate
 fill("00a-restated.md"); check("深化" in stage(), "after 00a -> sharpen (v2)")
 fill("00b-sharpened.md"); s = W.poc_prompt("lowpower-display")
 check("两轨独立设计" in s and "两个" in s and "install-agents" in s, "after 00b -> two designers; asks to install agents")
+check("## 上板的做法" in s and "/workflow/board/evk-watch" in s and "ask_human" in s,
+      "from step 2 on: the board rules (background + Monitor evk-watch; ask_human in PoC scripts)")
+check("## 上板的做法" not in W.poc_prompt("other-poc") and "不要让用户把命令贴到终端里执行" in W.poc_prompt("other-poc"),
+      "step 1: no board rules, but the rule that the agent runs the commands")
 fill("01a-design-v1.md"); s = W.poc_prompt("lowpower-display")
 check("两轨独立设计" in s and "一个" in s and "轨道 B" in s and "轨道 A" not in s.split("## 下一步")[1], "after 01a -> only track B")
 fill("01b-design-v2.md"); check("比较与融合" in stage(), "after 01b -> merge")
@@ -91,6 +95,7 @@ check("上一次构建失败" in W.poc_prompt("lowpower-display"), "another PoC'
 report("build", "4-ok", conf={"poc": new.name}, result="OK", start=iso(7), produced=["x.bin", WIC], errors=[])
 s = W.poc_prompt("lowpower-display")
 check("写板子（第 6 步）" in s and WIC in s and "evk-flash doctor" in s, "built -> flash, with the image of that build")
+check("Monitor 跟踪 `evk-watch`" in s and "evk-flash status" not in s, "flash step: background + evk-watch, no hand-off to the user")
 report("board", "1-wrong", command="rootfs", result="OK", start=iso(8), written=[{"file": "other.wic.gz"}])
 check("写板子（第 6 步）" in stage(), "flashing another image does not count")
 report("board", "2-ok", command="rootfs", result="OK", start=iso(9), written=[{"file": WIC}])

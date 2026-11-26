@@ -424,3 +424,45 @@ Tesera 是 RZ/G2L 客户板的 bring-up（`MACHINE=rzg2l-tlc-01`，VLP v4.0.2，
     - prompt 对这个目录直接进入第 1 步。
 
 **还没有验证**：在 VS Code 面板里，`/rz-docs:poc` 的第二个参数能否正常传入；新项目第一次完整构建镜像（要几个小时）。
+
+### 7.5 第一个真实 PoC：evk-mac（2026-11-26）
+
+在新项目 `rzg3l-bsp` 里，从第 0 步跑到交付，用时 09:01～16:14。已经有 `dist/`，`release-v1` 等用户确认交付物后再打。
+
+这次确认了之前没有验证的三项：
+
+- 在 VS Code 里，`/rz-docs:poc` 的第二个参数能正常传入；
+- 在新项目下的会话里，`poc-designer` 两轨和 `poc-merger` 都能调起；
+- `yocto-project setup` 实际用于一个 PoC（6 分钟）。
+
+**问题：命令交给了用户执行。** 11:54～13:20 之间，Agent 把 5 条上板命令交给用户贴到终端里执行，分别是 Step 0 的两个实验脚本和写官方镜像。用户在 13:46 提出之后，后续的上板步骤都由 Agent 在后台完成。原因有三：
+
+1. 在后台运行时，Agent 看不到中途的 `>>> 需要你操作`。之后它临时用 Monitor 加 `tail`/`grep` 来转发，一共写了 13 次，第一次就失败了。
+2. prompt 只在第 6 步讲了上板，第 5 步的上板实验没有任何说明。
+3. 工具问题打断了流程：
+   - 写官方镜像必须加 `--cm33 none`；
+   - 命令输出末尾没有换行时，`linux_cmd` 的结束标记会接在同一行，导致超时；
+   - QSPI 的提示文字和文档不一致。
+
+**改进（P1、P3，同日）**
+
+- `evk-watch`：跟踪当前占用串口的任务（`data/board-runs/active.json`），把事件逐行输出给 Monitor。`Progress` 写出 `*.events.jsonl`；进程没有报告结果就退出的，自动收尾。凡是通过 `evk.Console` 打开真实串口的脚本，都自动成为可跟踪的任务，PoC 不用额外写代码。
+- prompt：
+  - 始终遵守的规则：命令都由 Agent 运行，只有物理操作和 sudo 交给用户；
+  - 从第 2 步起显示"上板的做法"：后台运行，Monitor 跟踪 `evk-watch`，转告需要人做的操作；
+  - 第 5 步的上板实验也按这个做法执行。
+- 设计模板第 11 节增加"执行位置"一列（linux / host / boot / uboot / 人工观察）。设计 Agent 的规则：上板实验和验证都按"由主会话自动执行"来设计。
+- 修复：
+  - `evk-flash` 先读 WIC 的分区表（MBR/GPT），落在分区里的扇区不算嵌入的固件，官方镜像不再需要 `--cm33 none`；
+  - `linux_cmd` 的结束标记改为 `printf '\n%s%d\n'`；
+  - QSPI 的提示文字。
+- 测试：
+  - `eval/test_watch.py` 17 项；
+  - `test_board.py` 新增 6 项，共 27 项；
+  - `test_verify.py` 新增 1 项（用旧写法时这一项会失败，复现了实机上的现象）；
+  - `test_workflow.py` 新增 3 项，共 46 项。
+
+**下一步（P2、P4）**
+
+- P2：`evk-verify` 支持 `where = "uboot"`、断电步骤和启动方式的确认；Step 0 实验改用同样的计划文件格式；`evk-verify --lint`。
+- P4：把 evk-mac 的各项数据记为验收基线。

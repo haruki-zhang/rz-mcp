@@ -75,7 +75,7 @@ class FakeUBoot:
         self.env, self.mem, self.writes, self.reads = {}, {}, 0, 0
         self.line, self.stop, self.prev = "", False, ""
         self.fw = {"step": "cmd", "lines": []}
-        self.linux_cmds = linux_cmds or {}      # shell command -> (output, exit status)
+        self.linux_cmds = linux_cmds or {}      # shell command -> (output, exit status[, True = no final newline])
         self.tftp_rate = tftp_rate              # bytes/s for a visible transfer (0: instant)
         self.state = state                    # off | bootrom | fw | countdown | prompt | rebooting | login | shell
         if state == "prompt":
@@ -170,18 +170,20 @@ class FakeUBoot:
                 self.out(ch)
 
     def _shell(self, line: str) -> None:
-        m = re.match(r"(.*); echo (__RZ\d+__)\$\?$", line)
+        m = re.match(r"(.*); printf '\\n%s%d\\n' (__RZ\d+__) \$\?$", line)
+        old = None if m else re.match(r"(.*); echo (__RZ\d+__)\$\?$", line)      # the format before 2026-11-26
+        m = m or old
         cmd, mark = (m.group(1).strip(), m.group(2)) if m else (line, None)
         if cmd == "reboot":
             self.out("reboot: Restarting system\n")
             self.state = "rebooting"
             threading.Timer(1.0, self._reboot).start()
             return
-        out, rc = self.linux_cmds.get(cmd, (f"sh: {cmd.split()[0]}: not found", 127)) if cmd else ("", 0)
+        out, rc, *raw = self.linux_cmds.get(cmd, (f"sh: {cmd.split()[0]}: not found", 127)) if cmd else ("", 0)
         if out:
-            self.out(out + "\n")
+            self.out(out if raw and raw[0] else out + "\n")    # (out, rc, True): no newline at the end, like hexdump -e
         if mark:
-            self.out(f"{mark}{rc}\n")
+            self.out(f"{mark}{rc}\n" if old else f"\n{mark}{rc}\n")
         self.out(SHELL)
 
     # ------------------------------------------------------------ BootROM + Flash Writer
