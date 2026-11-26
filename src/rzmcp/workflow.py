@@ -13,6 +13,7 @@ import subprocess
 from pathlib import Path
 
 from . import ROOT
+from . import yocto as Y
 
 WORKFLOW = ROOT / "workflow"
 BUILD = WORKFLOW / "build"
@@ -41,12 +42,13 @@ RULES = """\
 
 - `/in-your-own-words` 和 `/sharpen` 只能由用户手动输入。不要代替它们，也不要自己写复述或深化来替代。
 - 每完成一步，在 PoC 仓库里执行一次 `git commit`，提交说明里写明是第几步。
-- 构建只能由主会话执行，同一时间只跑一个 bitbake（所有 PoC 共用一个构建目录）。执行前先告诉用户要构建什么、大约需要多久。
+- 构建只能由主会话执行；同一个 Yocto 项目里同一时间只跑一个 bitbake（项目里的 PoC 共用一个构建目录）。执行前先告诉用户要构建什么、大约需要多久。
+- 所有命令都带着 `--project {project}`，不要省略：这个 PoC 的 Yocto 项目就是它。调用 MCP 的 `get_bsp_release`、`bsp_source`、`bsp_grep`、`patch_stack`、`check_build_env` 时，也把它作为 `project` 参数传入。
 - 只针对 RZ/G3L。流程的定义见 `{plan}` 第 3 节。"""
 
 
 def project_dir() -> Path:
-    return Path(os.environ.get("RZ_POC_PROJECT", ROOT.parent / "rzg3l-bsp-v1"))
+    return Y.default_project()
 
 
 def repo_name(name: str) -> str:
@@ -80,7 +82,7 @@ def next_step(name: str, repo: Path, project: Path, done: dict[str, bool]) -> st
 ## 下一步：创建 PoC 仓库（第 1 步）
 
 1. 先问用户指南标题的写法。它决定交付文档的文件名，例如 "LowPower Display" 会生成 `RZG3L-LowPower-Display-Guide.md`。
-2. 运行 `python3 {WORKFLOW}/poc-new {name} --title "<标题>"`，这会创建 `{repo}`。
+2. 运行 `python3 {WORKFLOW}/poc-new {name} --title "<标题>" --project {project}`，这会创建 `{repo}`。
 3. 请用户粘贴设想的原文，有附件的话也请提供路径。原文**逐字**写入 `{d}/00-request.md`，不要改写，然后删掉第一行的标记；附件复制到 `{d}/attachments/`。
 4. 提交，然后请用户**手动输入 `/in-your-own-words`**。"""
     if not d.is_dir():
@@ -109,22 +111,27 @@ def next_step(name: str, repo: Path, project: Path, done: dict[str, bool]) -> st
 - 如果已经有结果：把四项分析和改写后的 v2 原样写入 `{d}/00b-sharpened.md`，删掉标记，提交。v2 不单独对齐。
 - 然后再次运行 `/rz-docs:poc {name}`，进入第 2、3 步。"""
     tracks = [t for t, f in (("A", "01a-design-v1.md"), ("B", "01b-design-v2.md")) if not done[f]]
+    past = Y.default_project()
+    past_item = "" if project == past else f"、过去 PoC 所在的共用项目 `$PAST` = `{past}`"
     if tracks:
         agents = ("" if agents_current(project) else
-                  f"0. 子 Agent 的定义没有安装，或者不是最新版：先运行 `python3 {WORKFLOW}/install-agents`。\n")
+                  f"0. 子 Agent 的定义没有安装，或者不是最新版：先运行 `python3 {WORKFLOW}/install-agents --project {project}`。"
+                  f"装好之后，如果这个会话是在安装之前打开的，请用户在 `{project}` 下重新打开 Claude Code，再输入 `/rz-docs:poc {name}`。\n")
         which = "两个" if len(tracks) == 2 else "一个"
         return f"""\
 ## 下一步：两轨独立设计（第 2、3 步）
 
+子 Agent 是项目级的：只有在 `{project}` 下打开的 Claude Code 会话才能调用 `poc-designer` 和 `poc-merger`。如果当前会话不是在那里打开的，或者找不到这两个子 Agent，请用户在 `{project}` 下重新打开 Claude Code，再输入 `/rz-docs:poc {name}`（不用再写目录）。
+
 {agents}1. 启动{which} `poc-designer` 子 Agent，负责轨道 {"、".join(tracks)}。有两个的话，在同一条消息里同时启动，让它们并行运行。
-   委托消息里**只写**这三项：PoC 路径 `{repo}`、Yocto 项目路径 `{project}`、轨道。不要写你自己的看法，也不要转述对话里的讨论，这样才能保证两轨相互独立。
+   委托消息里**只写**这几项：PoC 路径 `{repo}`、Yocto 项目路径 `{project}`{past_item}、轨道。不要写你自己的看法，也不要转述对话里的讨论，这样才能保证两轨相互独立。
 2. 都返回后，把它们的构建请求合并在一起。需要构建的，先向用户确认，再在主会话里按顺序执行。构建结果交回对应的 Agent，让它更新自己的方案。
 3. 提交 `design/`，然后再次运行 `/rz-docs:poc {name}`。"""
     if not (done["01-design.md"] and done["01-merge-notes.md"]):
         return f"""\
 ## 下一步：比较与融合（第 3 步）
 
-1. 启动一个 `poc-merger` 子 Agent。委托消息里**只写** PoC 路径 `{repo}` 和 Yocto 项目路径 `{project}`。
+1. 启动一个 `poc-merger` 子 Agent。委托消息里**只写** PoC 路径 `{repo}` 和 Yocto 项目路径 `{project}`{past_item}。
 2. 它返回后，如果有构建请求，按第 2、3 步的方法处理。然后提交 `design/`，再次运行 `/rz-docs:poc {name}`，进入对齐。"""
     if not done["02-decisions.md"] or not has_tag(repo, "design-v1"):
         return f"""\
@@ -139,7 +146,7 @@ def next_step(name: str, repo: Path, project: Path, done: dict[str, bool]) -> st
    待决定事项和可选项要**逐项**请用户决定。选项明确的，可以用提问工具。
 2. 把用户的每个决定和修改记入 `{d}/02-decisions.md`，并同步修改 `01-design.md`。
 3. 用户**明确确认**后：勾选结论，删掉标记，提交，然后在 PoC 仓库打 tag `design-v1`。没有用户的明确确认，不要打 tag。"""
-    return later_steps(name, repo, later_state(repo))
+    return later_steps(name, repo, later_state(repo, project), project)
 
 
 # ---------------------------------------------------------------- steps 5 and 6
@@ -148,7 +155,7 @@ def _ts(iso: str) -> float:
     return dt.datetime.fromisoformat(iso).timestamp()
 
 
-def later_state(repo: Path) -> dict:
+def later_state(repo: Path, project: Path | None = None) -> dict:
     """What steps 5-6 have produced, read from the PoC repository and the run reports."""
     s = {"layers": [d for d in (repo / "layers").glob("*") if (d / "conf" / "layer.conf").exists()]
          if (repo / "layers").is_dir() else []}
@@ -160,7 +167,8 @@ def later_state(repo: Path) -> dict:
     s["build"] = s["flash"] = None
     for f in sorted(runs("build-runs").glob("*/report.json"), reverse=True):
         rep = json.loads(f.read_text())
-        if isinstance(rep.get("conf"), dict) and rep["conf"].get("poc") == repo.name:
+        if isinstance(rep.get("conf"), dict) and rep["conf"].get("poc") == repo.name and \
+                (project is None or rep.get("project") in (None, str(project))):
             rep["_path"] = str(f)
             s["build"] = rep
             break
@@ -189,7 +197,8 @@ def later_state(repo: Path) -> dict:
     return s
 
 
-def later_steps(name: str, repo: Path, s: dict) -> str:
+def later_steps(name: str, repo: Path, s: dict, project: Path) -> str:
+    deploy = project / "build" / "tmp" / "deploy" / "images" / "smarc-rzg3l"
     built_ok = s["build"] and s["build"]["result"] == "OK" and _ts(s["build"]["start"]) >= s["last_commit"]
     if not (s["layers"] and s["build_conf"] and s["image"]):
         missing = [w for w, ok in (("layers/ 下的层", s["layers"]), ("build-conf/layers", s["build_conf"]),
@@ -200,13 +209,14 @@ def later_steps(name: str, repo: Path, s: dict) -> str:
 还缺：{"、".join(missing)}。按 `01-design.md` 第 5 节（改动清单）和第 10 节（PoC 步骤）实现。所有改动都放在本 PoC 仓库自己的层里，不要改 BSP，也不要改其他 PoC 的层。
 
 1. **构建配置**
-   - 如果本 PoC 基于当前的构建配置（例如已有的 combo），先运行 `python3 {BUILD}/poc-use --capture {repo}`，它会生成 `build-conf/layers` 和 `build-conf/local.conf`；
+   - 如果本 PoC 基于当前的构建配置（例如已有的 combo），先运行 `python3 {BUILD}/poc-use --capture {repo} --project {project}`，它会生成 `build-conf/layers` 和 `build-conf/local.conf`；
    - 在 `build-conf/layers` 的末尾加上本 PoC 的层，例如 `{repo.name}/layers/meta-rzg3l-<名称>`；
+   - 需要图形、codec、security 或 multi-os 的，把它们的层写进 `build-conf/layers`（路径见 `get_bsp_release` 的 Optional components）。项目里还没有的，`poc-use` 会自动从 rz-mcp 安装；security 还要在 `build-conf/local.conf` 里写上它要求的设置；
    - 把要构建的镜像名（例如 `lpdemo-image`）写进 `build-conf/image`，只写一行。
 2. **建层**：`layers/meta-rzg3l-<名称>/conf/layer.conf`，`LAYERSERIES_COMPAT = "scarthgap"`，优先级要高于它所依赖的层。
 3. **改动方法**
    - 改之前，先用 MCP 的 `patch_stack`、`bsp_source` 和 `check_build_env` 查清楚：改动会叠加在哪些补丁之上，涉及的配置在哪里关掉或打开；
-   - 内核、U-Boot、TF-A 的源码：先运行 `python3 {BUILD}/poc-env devtool modify <配方>`，在 `build/workspace/sources/<配方>` 里修改并 `git commit`，再运行 `python3 {BUILD}/poc-env devtool finish <配方> ../{repo.name}/layers/meta-rzg3l-<名称>`；
+   - 内核、U-Boot、TF-A 的源码：先运行 `python3 {BUILD}/poc-env --project {project} devtool modify <配方>`，在 `{project}/build/workspace/sources/<配方>` 里修改并 `git commit`，再运行 `python3 {BUILD}/poc-env --project {project} devtool finish <配方> ../{repo.name}/layers/meta-rzg3l-<名称>`；
    - 内核配置片段（`.cfg`）、设备树补丁、systemd 的设置等，通过 bbappend 加进来。
 4. 提交，然后再次运行 `/rz-docs:poc {name}`。"""
     if not built_ok:
@@ -218,8 +228,8 @@ def later_steps(name: str, repo: Path, s: dict) -> str:
 ## 下一步：构建（第 5 步）
 {prev}
 1. 先告诉用户：要用 `{repo.name}` 的配置构建 `{s['image']}`，当前的 build/conf 会被替换（旧文件会自动备份到 `build/conf/backup/`）。
-2. 运行 `python3 {BUILD}/poc-use {repo}`。
-3. 在后台运行 `python3 {BUILD}/poc-build {s['image']}`。增量构建通常需要几分钟到几十分钟。
+2. 运行 `python3 {BUILD}/poc-use {repo} --project {project}`。`build-conf/layers` 里有项目还没有的可选组件时，它会先自动安装。
+3. 在后台运行 `python3 {BUILD}/poc-build --project {project} {s['image']}`。增量构建通常需要几分钟到几十分钟；新搭建的项目第一次构建要几个小时。
 4. 构建成功后，再次运行 `/rz-docs:poc {name}`。
 
 构建结果必须晚于本仓库的最后一次提交才算数：如果构建之后又改了代码并提交，要重新构建。"""
@@ -232,12 +242,12 @@ def later_steps(name: str, repo: Path, s: dict) -> str:
         return f"""\
 ## 下一步：写板子（第 6 步）
 
-构建产物：`{s['wic']}`（构建报告 `{s['build']['_path']}`）。它在 Yocto 项目的 `build/tmp/deploy/images/smarc-rzg3l/` 下。
+构建产物：`{deploy}/{s['wic']}`（构建报告 `{s['build']['_path']}`）。
 
-1. 先运行 `/usr/bin/python3 {BOARD}/evk-flash doctor --image <deploy>/{s['wic']}`，有 FAIL 就先解决。
+1. 先运行 `/usr/bin/python3 {BOARD}/evk-flash doctor --image {deploy}/{s['wic']}`，有 FAIL 就先解决。
 2. 选择写入方式：
-   - 只改了内核或 rootfs：`evk-flash rootfs --image <deploy>/{s['wic']}`；
-   - 改了 BL2、FIP 或 CM33 固件：`evk-flash emmc --image <deploy>/{s['wic']}`。
+   - 只改了内核或 rootfs：`evk-flash rootfs --image {deploy}/{s['wic']}`；
+   - 改了 BL2、FIP 或 CM33 固件：`evk-flash emmc --image {deploy}/{s['wic']}`。
 3. 在后台运行。看到 `>>> 需要你操作` 时，把内容原样转告用户（拨码、上电等）。
    用户问进度时，运行 `/usr/bin/python3 {BOARD}/evk-flash status`，它会给出当前步骤、百分比、剩余时间，以及是否在等人操作。如果用户自己在终端里运行，进度会在终端里实时显示。
 4. 写入成功后，再次运行 `/rz-docs:poc {name}`。"""
@@ -254,7 +264,7 @@ def later_steps(name: str, repo: Path, s: dict) -> str:
    - 每一项都要写 `where` 和 `run`，以及 `expect`（或者 `boot` 类型的 `max_seconds`）；
    - 能在主机上客观判定的项，用 `where = "host"`，例如 ping 板子；
    - 写完删掉第一行的标记，然后提交。
-2. 运行 `/usr/bin/python3 {BOARD}/evk-verify {repo}`。它会生成 `design/03-verification.md`，原始日志放在 `design/verify-logs/`。
+2. 运行 `/usr/bin/python3 {BOARD}/evk-verify {repo} --project {project}`。它会生成 `design/03-verification.md`，原始日志放在 `design/verify-logs/`。
 3. 全部通过的话，提交，然后再次运行 `/rz-docs:poc {name}`。"""
     if not s["package"]:
         return f"""\
@@ -264,7 +274,7 @@ def later_steps(name: str, repo: Path, s: dict) -> str:
    - `README.md`；
    - `docs/<Guide>.md`，包括 Objective、How It Works、Implementation Steps、Running the Demo、Known Limitations、Deliverables 这几节。验证时接受了的限制，必须写进 Known Limitations；
    - 各层的 README，以及 `image/README.md`。
-2. 运行 `python3 {BUILD}/poc-package {repo} --image <deploy>/{s['wic']} --version v1.0`。它会生成 PDF；如果还有模板占位没替换，会给出警告。
+2. 运行 `python3 {BUILD}/poc-package {repo} --project {project} --image {deploy}/{s['wic']} --version v1.0`。它会生成 PDF；如果还有模板占位没替换，会给出警告。交付包里不能有 rz-mcp/packages/ 里的授权软件，也不能引用机密文档（list_documents 里标了 CONFIDENTIAL 的）。
 3. 请用户检查 `dist/` 里的交付物。用户确认之后，提交并打 tag `release-v1`。"""
     if not s["release"]:
         return f"""\
@@ -277,12 +287,84 @@ def later_steps(name: str, repo: Path, s: dict) -> str:
 交付包：`{s['package']}`。如果要做洁净室复现，在正式交付前另行安排，具体做法见 `{BUILD}/README.md`。"""
 
 
-def poc_prompt(name: str) -> str:
+STEP1 = ("00-request.md", "00a-restated.md", "00b-sharpened.md")
+
+
+def env_step(name: str, project: Path, a: dict, done: dict[str, bool], explicit: bool) -> str | None:
+    """Step 0: the Yocto project itself. None when it is ready for the PoC's current step."""
+    setup = f"python3 {BUILD}/yocto-project setup {project}"
+    in_step1 = not all(done[f] for f in STEP1)
+    if a["state"] == "unusable":
+        return f"""\
+## 停下：`{project}` 不能用作 Yocto 项目
+
+{Y.describe(a)}
+
+它既不是空目录，也不是可用的 {a['release']} 项目。**不要改动它，也不要删除里面的任何东西。**
+请用户另选一个目录（不存在或空的目录会自动搭建；已经可用的项目会直接复用），然后输入 `/rz-docs:poc {name} <目录>`；或者先按上面的问题修好它。"""
+    usable = a["state"] == "usable"
+    missing = [] if not usable else [w for w in a["warnings"] if "not fetched" in w or "no build/conf" in w]
+    if usable and not missing:
+        return None
+    if a["running"]:
+        if in_step1:
+            return None                      # step 1 does not need the project; the setup goes on meanwhile
+        return f"""\
+## 等待：Yocto 项目 `{project}` 正在搭建
+
+第 2 步的调研要读这个项目里的官方源码，所以要等搭建完成。进度见 `{project}/{Y.STATE_DIR}/setup.log`。
+完成后再次运行 `/rz-docs:poc {name}`。"""
+    if usable:
+        what = "可用，但还缺：" + "；".join(missing)
+        todo = f"在后台运行 `{setup}`。它会直接复用这个项目，只补上缺的部分（写入 baseline 的 build/conf、取回官方源码），通常要几分钟到几十分钟。"
+    else:
+        what = "上次的搭建没有完成" if a["state"] == "incomplete" else "不存在，或者是空目录"
+        todo = (f"在后台运行 `{setup}`。" + ("它会从中断的地方接着做。" if a["state"] == "incomplete" else "") +
+                "它会按 catalog 拉取 poky、meta-arm、meta-openembedded、meta-renesas 并核对 pin，写入 baseline 的 build/conf，"
+                "再在构建容器里取回内核、U-Boot、TF-A 的官方源码。在这台机器上实测约 6 分钟、4.3 GB，几乎都是下载，网络慢时会更久。"
+                "这个项目的下载和构建缓存都是独立的，不和其他项目共享，所以第 5 步第一次构建要几个小时，大约占用 60 GB 磁盘。")
+    step1 = ("\n4. 搭建在后台进行时，可以先做第 1 步：再次运行 `/rz-docs:poc " + name + "`。" if in_step1 else
+             "\n4. 完成后再次运行 `/rz-docs:poc " + name + "`。")
+    return f"""\
+## 下一步：准备 Yocto 项目（第 0 步）
+
+`{project}`：{what}。
+
+1. 先告诉用户要做什么、大约多久、占多少磁盘（见第 2 项），用户同意后再开始。
+2. {todo}
+   图形、codec、security、multi-os 这些可选组件现在不用装：到第 5 步，`poc-use` 会按 PoC 的 `build-conf/layers` 自动从 rz-mcp 安装。
+3. 如果失败：把错误原样告诉用户。网络之类的问题解决后，同一条命令再运行一次就会接着做。**不要手动删除或修改 `{project}` 里的东西。**{step1}"""
+
+
+def resolve(name: str, project_arg: str) -> tuple[Path | None, bool, str | None]:
+    """(project, explicit, error)."""
+    reg = Y.registry()
+    if project_arg.strip():
+        try:
+            project = Y.resolve_project(project_arg)
+        except ValueError as e:
+            return None, True, str(e)
+        old = reg.get(name)
+        if old and Path(old) != project and (Path(old) / repo_name(name)).exists():
+            return None, True, (f"PoC `{name}` 已经在 `{old}` 里（`{Path(old) / repo_name(name)}`）。"
+                                f"要继续它，输入 `/rz-docs:poc {name}`，不用写目录；要在 `{project}` 里另起一个 PoC，请换一个名称。")
+        return project, True, None
+    if name in reg:
+        return Path(reg[name]), False, None
+    return project_dir(), False, None
+
+
+def poc_prompt(name: str, project_arg: str = "") -> str:
     name = name.strip()
     if not NAME_RE.match(name):
         return (f"PoC 名称 {name!r} 不合法：请用小写单词加 `-` 连接，例如 `lowpower-display`。"
-                "用法：`/rz-docs:poc <名称>`")
-    project = project_dir()
+                "用法：`/rz-docs:poc <名称> [Yocto 项目目录]`")
+    project, explicit, err = resolve(name, project_arg or "")
+    if err:
+        return f"# RZ/G3L PoC 工作流：{name}\n\n## 停下\n\n{err}"
+    if explicit:
+        Y.register_poc(name, project)
+    a = Y.assess(project)
     repo = project / repo_name(name)
     done = {f: filled(repo / "design" / f) for f, _, _ in FILES}
     rows = "\n".join(f"| {step} | `design/{f}` | {what} | {'✓' if done[f] else '—'} |" for f, step, what in FILES)
@@ -290,7 +372,7 @@ def poc_prompt(name: str) -> str:
     state = (f"| 步骤 | 文件 | 内容 | 状态 |\n|---|---|---|---|\n{rows}\n| 4 | tag `design-v1` | 对齐完成 | {tag} |"
              if repo.exists() else "仓库还不存在。")
     if repo.exists() and tag == "✓":
-        s = later_state(repo)
+        s = later_state(repo, project)
         built = bool(s["build"] and s["build"]["result"] == "OK" and _ts(s["build"]["start"]) >= s["last_commit"])
         mark = lambda ok: "✓" if ok else "—"
         state += (f"\n| 5 | `layers/`、`build-conf/` | 实现 | {mark(s['layers'] and s['build_conf'] and s['image'])} |"
@@ -299,18 +381,25 @@ def poc_prompt(name: str) -> str:
                   f"\n| 6 | `design/03-verification.md` | 上板验证 | {mark(s['verified'])} |"
                   f"\n| 5 | `dist/` | 交付包 | {mark(s['package'])} |"
                   f"\n| 5 | tag `release-v1` | 交付完成 | {mark(s['release'])} |")
+    label = {"absent": "还没有搭建", "incomplete": "搭建" + ("进行中" if a["running"] else "没有完成"),
+             "usable": "可用", "unusable": "不可用"}[a["state"]]
+    nxt = env_step(name, project, a, done, explicit)
+    if nxt is None:
+        nxt = next_step(name, repo, project, done)
+    if a["running"] and not all(done[f] for f in STEP1) and a["state"] != "usable":
+        nxt = (f"Yocto 项目正在后台搭建（进度见 `{project}/{Y.STATE_DIR}/setup.log`），第 1 步不需要它，可以先做。\n\n" + nxt)
     return f"""\
 # RZ/G3L PoC 工作流：{name}（第 1～6 步）
 
 你是主会话，负责推进这个流程。下面是从磁盘上读到的当前状态，以及下一步要做的事。
-每完成一步，用户都可以再次输入 `/rz-docs:poc {name}` 继续。
+每完成一步，用户都可以再次输入 `/rz-docs:poc {name}` 继续（目录已经记下，不用再写）。
 
 - PoC 仓库：`{repo}`
-- Yocto 项目：`{project}`
+- Yocto 项目：`{project}`（{label}{"，本次指定" if explicit else ""}）
 
 {state}
 
-{next_step(name, repo, project, done)}
+{nxt}
 
-{RULES.format(plan=ROOT / "plan" / "PoC_Workflow_Plan.md")}
+{RULES.format(plan=ROOT / "plan" / "PoC_Workflow_Plan.md", project=project)}
 """

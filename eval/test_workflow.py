@@ -39,7 +39,12 @@ check(run(RZ / "workflow/poc-new", "Bad_Name").returncode != 0, "rejects an inva
 
 # 2. prompt stage progression
 sys.path.insert(0, str(RZ / "src"))
+os.environ["RZ_POC_REGISTRY"] = str(PRJ.parent / "poc-projects.json")
 from rzmcp import workflow as W
+# The throwaway project is not a real Yocto project. Step 0 (the project itself) is tested in test_yocto_project.py;
+# here the project counts as usable so that only the PoC's own stages are exercised.
+W.Y.assess = lambda p, *a, **k: {"project": str(p), "release": "RZG3L-BSP-1.0.0", "state": "usable", "problems": [],
+                                 "warnings": [], "components": {}, "running": False, "setup": None}
 D = new / "design"
 def stage(name="lowpower-display"):
     m = re.search(r"^## (.+)$", W.poc_prompt(name).split("当前状态")[0] if False else W.poc_prompt(name).split("\n## 始终遵守")[0], re.M)

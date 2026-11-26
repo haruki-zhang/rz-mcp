@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run bitbake for the shared Yocto project inside the build container (step 5).
 
-    workflow/build/poc-build <target> [<target> ...] [--task populate_sdk] [--container max-ubuntu22.04]
+    workflow/build/poc-build <target> [<target> ...] [--task populate_sdk] [--project DIR] [--container max-ubuntu22.04]
 
 The host runs Ubuntu 26.04; the BSP is built on Ubuntu 22.04 (Start-up Guide 2.1), in the container that mounts
 the workspace at the same path. Only one bitbake at a time per build directory: refuses while one is running.
@@ -71,7 +71,7 @@ def main() -> None:
     m = re.search(r"Tasks Summary: Attempted (\d+) tasks of which (\d+) didn't need to be rerun and (all succeeded|(\d+) failed)", text)
     produced = sorted(str(f.relative_to(build / DEPLOY)) for f in (build / DEPLOY).glob("*")
                       if f.is_file() and not f.is_symlink() and f.stat().st_mtime >= t0 - 1)
-    report = {"command": bb, "container": a.container, "start": start.isoformat(timespec="seconds"),
+    report = {"command": bb, "project": str(project), "container": a.container, "start": start.isoformat(timespec="seconds"),
               "seconds": round(time.time() - t0), "exit": rc, "result": "OK" if rc == 0 else "FAILED",
               "conf": json.loads(conf.read_text()) if conf.exists() else "build/conf not written by poc-use",
               "tasks": {"attempted": int(m.group(1)), "not_rerun": int(m.group(2)),

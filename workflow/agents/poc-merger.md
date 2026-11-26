@@ -30,7 +30,7 @@ disallowedTools: Agent
 
 1. **事实。** 两版方案中的每一条硬件事实和引用，都要重新核对一遍：
    - 文档用 MCP 的 `read_pages`、`get_section` 或 `lookup_register`；
-   - 源码用 MCP 的 `bsp_source` 和 `bsp_grep`（读的是官方 rev）；
+   - 源码用 MCP 的 `bsp_source` 和 `bsp_grep`（读的是官方 rev），`project` 参数总是传 `$PRJ`；
    - 核实的结果记入融合说明第 1 节；不通过和无法核实的条目，不能进入融合版的正文。
 2. **v1 的覆盖。** v1 中的每一个需求项都必须在融合版中有着落，逐条记入融合说明第 2 节。
 3. **v2 带来的深度。**

@@ -428,7 +428,7 @@ def main() -> None:
     if getattr(a, "image", None):
         image, bmap, image_id = image_paths(a.image)
     deploy = (a.deploy or (image.parent if image else
-              RZ.parent / "rzg3l-bsp-v1" / "build" / "tmp" / "deploy" / "images" / "smarc-rzg3l")).resolve()
+              Path(os.environ.get("RZ_POC_PROJECT", RZ.parent / "rzg3l-bsp-v1")) / "build" / "tmp" / "deploy" / "images" / "smarc-rzg3l")).resolve()
     target = {"doctor": a.__dict__.get("target"), "bootloader": a.__dict__.get("target"), "emmc": "emmc"}.get(a.cmd)
 
     if a.cmd == "doctor":

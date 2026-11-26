@@ -8,6 +8,7 @@ device = "rzg3l"
 title = "Renesas RZ Linux BSP Plus for RZ/G3L"
 machine = "smarc-rzg3l"
 yocto = "scarthgap (poky scarthgap-5.0.14)"
+poky_version = "5.0.14"           # DISTRO_VERSION in poky/meta-poky/conf/distro/poky.conf: identifies a tarball (non-git) poky
 template = "meta-renesas/meta-rz-distro/conf/templates/bsp-plus-conf"
 source = "https://renesas-rz.github.io/rz_linux_bsp_plus/RZG/how_to_build_linux_bsp_plus/ (RZ/G3L, RZ/G3SE tab; read 2026-11-25)"
 note = "meta-renesas tag RZG3L-BSP-1.0.0 is the same commit as BSP-PLUS-K6.12-V4.0 (git ls-remote, 2026-11-25)"
@@ -19,11 +20,66 @@ layers = [
   { name = "meta-renesas", url = "https://github.com/renesas-rz/meta-renesas", tag = "RZG3L-BSP-1.0.0", rev = "4823845d3a9a772324218ba753a0e7983905c924" },
 ]
 
-# Not in git: download from renesas.com (login), then extract into the Yocto project (How To Build, Step 1 / 2.5).
-proprietary = [
-  { name = "graphics", part = "RTK0EF0045Z14001ZJ", layer = "meta-rz-features/meta-rz-graphics", needed_for = "core-image-weston with the GPU" },
-  { name = "codec", part = "RTK0EF0045Z16002ZJ", layer = "meta-rz-features/meta-rz-codecs", needed_for = "video codec (includes a prebuilt archive)" },
-]
+# Optional components: not part of the official template. A project gets one only when its configuration uses one
+# of its layers (workflow/build/yocto-project add, or poc-use when a PoC's build-conf/layers names the layer).
+#   kind = "package": a licensed zip from renesas.com, kept read-only in rz-mcp/<file> (never in git, never in a PoC
+#                     delivery). Checked against sha256, then each `extract` member (a tar.gz; "a.zip!b.tar.gz" = a
+#                     tar.gz inside a zip inside the package) is unpacked into the project directory, as in How To
+#                     Build Step 2 ("cd ${WORK}; unzip; tar zxvf").
+#   kind = "git":     cloned into <dest> and checked out at <rev>.
+[[releases."RZG3L-BSP-1.0.0".optional]]
+name = "graphics"
+kind = "package"
+part = "RTK0EF0045Z14001ZJ"
+version = "5.1.3.2"
+file = "packages/RZG3L-BSP-1.0.0/RTK0EF0045Z14001ZJ-5.1.3.2_JP.zip"
+sha256 = "6d308d0befe433584fb421f5ca1c4b1cd2dc2148839b3fd186e433b8e1d211e2"
+extract = ["RTK0EF0045Z14001ZJ-5.1.3.2_JP/meta-rz-features-5.1.3.2.tar.gz"]
+layers = ["meta-rz-features/meta-rz-graphics"]
+needed_for = "core-image-weston with the GPU (not needed for core-image-minimal)"
+source = "How To Build (RZ/G3L tab), Step 1: Graphics v5132"
+verified = "2026-11-26: the unpacked layer is identical to rzg3l-bsp-v1/meta-rz-features/meta-rz-graphics"
+
+[[releases."RZG3L-BSP-1.0.0".optional]]
+name = "codecs"
+kind = "package"
+part = "RTK0EF0045Z16002ZJ"
+version = "5.1.5.0"
+file = "packages/RZG3L-BSP-1.0.0/RTK0EF0045Z16002ZJ-5.1.5.0_JP.zip"
+sha256 = "b86fa335bec84201cb4f5139e2da0af34264574b509829ce8f50623a56ed3484"
+extract = ["RTK0EF0045Z16002ZJ-5.1.5.0_JP/meta-rz-features_codec-5.1.5.0.tar.gz",
+           "RTK0EF0045Z16002ZJ-5.1.5.0_JP/RTK0EF0239Z00001ZJ-5.1.5.0.zip!meta-rz-features_codec-5.1.5.0_prebuilt.tar.gz"]
+layers = ["meta-rz-features/meta-rz-codecs"]
+needed_for = "video codecs (OMX / GStreamer plugins); the prebuilt archive is part of it"
+source = "How To Build (RZ/G3L tab), Step 1: Video Codec v5150"
+verified = "2026-11-26: the unpacked layer (with the prebuilt archive) is identical to rzg3l-bsp-v1/meta-rz-features/meta-rz-codecs"
+
+[[releases."RZG3L-BSP-1.0.0".optional]]
+name = "security"
+kind = "package"
+part = "RTK0EF0121Z00000ZJ"
+version = "6.12-v1.0"
+file = "packages/RZG3L-BSP-1.0.0/RTK0EF0121Z00000ZJ-11-6.12-v1.0.zip"
+sha256 = "755115198344ab9e5e6b38579e44984b71c120af1cd66b701315ce8f835c24c1"
+extract = ["RTK0EF0121Z00000ZJ-11-6.12-v1.0/meta-rz-features_security.tar.gz"]
+layers = ["meta-rz-features/meta-rz-security"]
+needed_for = "secure boot / OP-TEE / RZ SCE. The PoC's build-conf/local.conf sets TRUSTED_BOARD_BOOT, ENABLE_SPD_OPTEE, ENABLE_RZ_SCE and its own keys (Security Startup Guide R11AN1073EJ0110)"
+source = "Release note R11UT0130EJ0100: RZ MPU Security Package for RZ/G3L Linux BSP Plus Kernel 6.12 v1.0, target RZ Linux BSP Plus Kernel 6.12 v4.0. Obtaining it needs Renesas' approval"
+note = "The package also holds host tools (security_configurator, manifest_generation_tool), the three PDFs and sample keys; only the layer is installed"
+
+[[releases."RZG3L-BSP-1.0.0".optional]]
+name = "multi-os"
+kind = "git"
+url = "https://github.com/renesas-rz/meta-rz-multi-os"
+tag = "v4.0.0"
+rev = "8edaac208c3f9757e63852bc761d08c47653248c"
+dest = "meta-rz-features/meta-rz-multi-os"
+layers = ["meta-rz-features/meta-rz-multi-os/meta-rzg3l"]
+legacy_layers = ["meta-rz-features/meta-rz-multi-os/meta-rzg/meta-rzg3l"]   # layout of the pre-git copy in rzg3l-bsp-v1
+needed_for = "CM33 firmware loaded by BL2 (RZ_CM33_FIRMWARE_LOAD), OpenAMP samples"
+source = "https://github.com/renesas-rz/meta-rz-multi-os, commit 'Add RZ/G3L support for Multi-OS with BSP-PLUS-K6.12-V4.0' (tag v4.0.0)"
+verified = "2026-11-26: meta-rzg3l at v4.0.0 is identical to rzg3l-bsp-v1/meta-rz-features/meta-rz-multi-os/meta-rzg/meta-rzg3l"
+note = "rzg3l-bsp-v1 has an older (pre-git) layout, meta-rz-multi-os/meta-rzg/meta-rzg3l: a PoC's build-conf/layers written there names that path"
 
 [releases."RZG3L-BSP-1.0.0".components.kernel]
 recipe = "meta-rz-bsp/recipes-kernel/linux/linux-renesas_6.12.bb"

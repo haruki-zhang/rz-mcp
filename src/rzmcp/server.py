@@ -156,57 +156,64 @@ def build_server() -> MCPServer:
         return Q.search_registers(query=query, device=device, module=module, limit=limit)
 
     CompArg = Annotated[str, Field(description="Component: 'kernel' (rz_linux-cip), 'u-boot' (renesas-u-boot-cip) or 'tf-a' (rzg_trusted-firmware-a)")]
+    ProjArg = Annotated[Optional[str], Field(description="Yocto project directory (absolute path). Default: the shared project rzg3l-bsp-v1. Pass the PoC's project when it lives in another one")]
 
     @mcp.tool(**ro)
     @_logged
-    def get_bsp_release(release: Annotated[str, Field(description="Release id; default the RZ/G3L BSP Plus release")] = "RZG3L-BSP-1.0.0") -> str:
+    def get_bsp_release(release: Annotated[str, Field(description="Release id; default the RZ/G3L BSP Plus release")] = "RZG3L-BSP-1.0.0",
+                        project: ProjArg = None) -> str:
         """The RZ/G3L BSP release as Renesas publishes it: git layer pins, TEMPLATECONF, the kernel / U-Boot / TF-A
         revisions meta-renesas pins for rzg3l-family (checked against the Yocto project), proprietary packages,
         and the boot media layout (eMMC boot partition sectors, EXT_CSD, QSPI addresses, SW_MODE)."""
-        return B.get_bsp_release(release)
+        return B.get_bsp_release(release, project)
 
     @mcp.tool(**ro)
     @_logged
     def bsp_source(component: CompArg,
                    path: Annotated[str, Field(description="Path in the repository, e.g. 'drivers/watchdog/rzg2l_wdt.c', 'arch/arm64/boot/dts/renesas', 'configs/smarc-rzg3l_defconfig'. A directory lists its entries.")],
                    start_line: Annotated[int, Field(description="First line to return")] = 1,
-                   max_lines: Annotated[int, Field(description="Lines to return (max 2000)")] = 300) -> str:
+                   max_lines: Annotated[int, Field(description="Lines to return (max 2000)")] = 300,
+                   project: ProjArg = None) -> str:
         """Read a file (or list a directory) of the OFFICIAL kernel / U-Boot / TF-A source at the revision the BSP
         pins, from bitbake's git mirror. Use this instead of build/tmp/work-shared, which carries PoC patches."""
-        return B.bsp_source(component, path, start_line, max_lines)
+        return B.bsp_source(component, path, start_line, max_lines, project)
 
     @mcp.tool(**ro)
     @_logged
     def bsp_grep(component: CompArg,
                  pattern: Annotated[str, Field(description="Extended regular expression, e.g. 'renesas,r9a08g046' or 'rzg2l_wdt_probe'")],
                  path: Annotated[Optional[str], Field(description="Optional path prefix to search in, e.g. 'drivers/net'")] = None,
-                 limit: Annotated[int, Field(description="Max hits (1-300)")] = 60) -> str:
+                 limit: Annotated[int, Field(description="Max hits (1-300)")] = 60,
+                 project: ProjArg = None) -> str:
         """git grep in the OFFICIAL kernel / U-Boot / TF-A source at the BSP's revision. Returns path:line: text."""
-        return B.bsp_grep(component, pattern, path, limit)
+        return B.bsp_grep(component, pattern, path, limit, project)
 
     @mcp.tool(**ro)
     @_logged
-    def patch_stack(component: CompArg) -> str:
+    def patch_stack(component: CompArg, project: ProjArg = None) -> str:
         """What the active layers (build/conf/bblayers.conf) add on top of the official revision: patch / config
         fragment files per layer with their subject, and for the kernel the commits the last build applied, each
         traced to the layer whose patch it came from."""
-        return B.patch_stack(component)
+        return B.patch_stack(component, project)
 
     @mcp.tool(**ro)
     @_logged
-    def check_build_env() -> str:
-        """Compare the Yocto project's build configuration with the BSP release: TEMPLATECONF, MACHINE, DISTRO,
+    def check_build_env(project: ProjArg = None) -> str:
+        """Compare the Yocto project's build configuration with the BSP release: whether the directory is a usable
+        project at all, optional components (graphics, codecs, security, multi-os), TEMPLATECONF, MACHINE, DISTRO,
         official and extra layers (and which PoC repository owns each), RM_WORK_EXCLUDE, layer checkouts,
         component revisions and git mirrors, whether bitbake is running."""
-        return B.check_build_env()
+        return B.check_build_env(project)
 
     @mcp.prompt(name="poc", title="RZ/G3L PoC workflow (steps 1-6)",
                 description="推进 RZ/G3L PoC 工作流的第 1～6 步：设想 → v1/v2 → 两轨方案 → 融合 → 对齐 → 实现、构建 → 写板子、验证 → 打包。"
-                            "参数：PoC 名称（一个词，例如 lowpower-display）。每完成一步再运行一次即可继续。")
+                            "参数：PoC 名称（一个词，例如 lowpower-display）；可选的第二个参数是 Yocto 项目目录（绝对路径），"
+                            "不存在或为空时会先自动搭建，已经可用时直接复用；不写则用上次为这个 PoC 指定的目录，否则用共用的 rzg3l-bsp-v1。"
+                            "每完成一步再运行一次即可继续。")
     @_logged
-    def poc(name: str) -> str:
+    def poc(name: str, project: str = "") -> str:
         """Steps 1-6 of the PoC workflow; reads the PoC repository state and returns the next step."""
-        return W.poc_prompt(name)
+        return W.poc_prompt(name, project)
 
     return mcp
 

@@ -69,6 +69,23 @@ register_modules = ["5.4", "7.4", "4.4"]   # pilot: WDT (simple), SCIFA (medium)
 note = "Public edition. Some section numbers are absent (e.g. 3.3, 5.3, 5.6, 6.4, 7.6, 8.2-8.4)."
 
 [[documents]]
+id = "R01UH1152EJ0110"
+title = "RZ/G3L Group, RZ/G3SE Group Hardware Manual (Additional document)"
+doc_type = "hw_manual"
+rev = "1.10"
+path = "docs/devices/rzg3l/r01uh1152ej0110-rzg3l,g3se-additional.pdf"
+pages = 5345
+devices = ["rzg3l", "rzg3se"]
+boards = []
+confidentiality = "confidential"      # every page is marked CONFIDENTIAL
+index = []                            # registered only: not served by the MCP until the user decides how (2026-11-26)
+outline = "bookmarks"
+note = """CONFIDENTIAL edition; not indexed. Superset of R01UH1153EJ0110 (compared 2026-11-26): all 66 top-level \
+sections and their titles are the same; it adds 6.3.2 GBETH Registers (268 bookmarks, p.1868-) and 5 entries in \
+3.4 (e.g. 3.4.2.1 External Pin Swizzling); it does not add 3.3, 5.3, 5.6, 6.4, 7.6 or 8.2-8.4. Page = public page \
++6 up to 3.4.2, +15 from 3.5 to 6.3, +658 from 6.5 on. Never quote it in customer deliverables."""
+
+[[documents]]
 id = "R01DS0469EJ0110"
 title = "RZ/G3L Group, RZ/G3SE Group Datasheet"
 doc_type = "datasheet"

@@ -9,6 +9,9 @@
 <poc> is a PoC repository (path, or name under the project such as rzg3l-lowpower-display). Its build-conf/ has:
     layers       one layer per line, relative to the project directory (or absolute); '#' starts a comment
     local.conf   lines appended to local.conf as they are
+A layer of an optional component (graphics, codecs, security, multi-os; catalog/bsp_releases.toml) that the
+project does not have yet is installed first (workflow/build/yocto_setup.py: licensed packages from
+rz-mcp/packages/ after their sha256 matches). --dry-run only reports it.
 The official template is the release's TEMPLATECONF (catalog/bsp_releases.toml, bsp-plus-conf). The standard
 part keeps the kernel, U-Boot and TF-A work directories (RM_WORK_EXCLUDE), which patch_stack and the designers
 read. The previous build/conf files are kept in build/conf/backup/<time>/. Refuses while bitbake is running.
@@ -24,6 +27,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 from rzmcp import yocto as Y  # noqa: E402
+
+sys.path.insert(0, str(ROOT / "workflow" / "build"))
+import yocto_setup as S  # noqa: E402
 
 STANDARD = ['MACHINE = "smarc-rzg3l"', 'RM_WORK_EXCLUDE += "linux-renesas u-boot trusted-firmware-a"']
 
@@ -75,7 +81,7 @@ def generate(project: Path, build: Path, layers: list[Path], extra_local: str, l
     return bbl, local
 
 
-def read_fragment(poc: Path, project: Path) -> tuple[list[Path], str]:
+def read_fragment(poc: Path, project: Path, dry_run: bool = False) -> tuple[list[Path], str]:
     d = poc / "build-conf"
     if not (d / "layers").exists():
         sys.exit(f"{d}/layers missing: create it, or capture the current configuration with --capture {poc.name}")
@@ -85,7 +91,20 @@ def read_fragment(poc: Path, project: Path) -> tuple[list[Path], str]:
         if line:
             p = Path(line) if Path(line).is_absolute() else project / line
             if not (p / "conf" / "layer.conf").exists():
-                sys.exit(f"{d}/layers: {line} is not a layer (no conf/layer.conf)")
+                rel = str(p.relative_to(project)) if p.is_relative_to(project) else line
+                comp = Y.component_for_layer(rel)
+                if not comp:
+                    sys.exit(f"{d}/layers: {line} is not a layer (no conf/layer.conf)")
+                if dry_run:
+                    print(f"# would install the optional component {comp['name']} for {rel}", file=sys.stderr)
+                else:
+                    try:
+                        print(*S.add_components(project, [comp["name"]]), sep="\n")
+                    except S.SetupError as e:
+                        sys.exit(f"{d}/layers: {line} needs the optional component {comp['name']}: {e}")
+                if rel in comp.get("legacy_layers", []) and not (p / "conf" / "layer.conf").exists():
+                    p = project / comp["layers"][0]          # the PoC names the old layout of rzg3l-bsp-v1
+                    print(f"note: {line} is the old layout; using {comp['layers'][0]}", file=sys.stderr)
             layers.append(p.resolve())
     local = (d / "local.conf").read_text() if (d / "local.conf").exists() else ""
     return layers, local
@@ -122,7 +141,9 @@ def main() -> None:
     if a.capture:
         capture(poc, project, build)
         return
-    layers, extra = read_fragment(poc, project) if poc else ([], "")
+    if not a.dry_run and Y.bitbake_busy(build):
+        sys.exit(f"bitbake is running in {build}; wait for it to finish")
+    layers, extra = read_fragment(poc, project, a.dry_run) if poc else ([], "")
     label = poc.name if poc else "baseline"
     bbl, local = generate(project, build, layers, extra, label)
     conf = build / "conf"

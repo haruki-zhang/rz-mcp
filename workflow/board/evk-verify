@@ -18,6 +18,7 @@ Pass/fail is decided by these fields only. Output: design/03-verification.md, de
 (console.log, results.json). Exit status 0 only if every check passed.
 """
 import argparse
+import os
 import datetime as dt
 import json
 import re
@@ -79,7 +80,8 @@ def main() -> None:
     ap.add_argument("--plan", type=Path)
     ap.add_argument("--port", default=evk.PORT)
     ap.add_argument("--wait", type=float, default=600)
-    ap.add_argument("--project", type=Path, default=HERE.parent.parent.parent / "rzg3l-bsp-v1")
+    ap.add_argument("--project", type=Path,
+                    default=Path(os.environ.get("RZ_POC_PROJECT", HERE.parent.parent.parent / "rzg3l-bsp-v1")))
     a = ap.parse_args()
     poc = next((p.resolve() for p in (Path(a.poc), a.project / a.poc, a.project / f"rzg3l-{a.poc}") if p.is_dir()), None)
     if poc is None:

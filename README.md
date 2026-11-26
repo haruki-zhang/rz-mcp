@@ -9,10 +9,13 @@ docs/                   原始资料（只读），按归属分目录
   boards/<board>/         板级：EBM、原理图、BOM、勘误、设计数据
   family/<family>/        跨器件：DRAM list、Linux 驱动手册
 src/rzmcp/              索引器、查询层、MCP server
-data/rz.db              生成物（可随时重建），另有 calls.jsonl（调用日志）、.token
+packages/<BSP 版本>/    授权软件包（图形、codec、security），只读，不进 git；在 catalog/bsp_releases.toml 里登记 sha256，按需装进 Yocto 项目
+data/rz.db              生成物（可随时重建），另有 calls.jsonl（调用日志）、.token、poc-projects.json（PoC 所在的 Yocto 项目）
 eval/                   冒烟测试题和评测脚本
 plan/                   计划书、可行性报告、W3 spike 报告
 ```
+
+`docs/devices/rzg3l/` 里还有硬件手册的机密版 R01UH1152EJ0110（Additional document，每页标有 CONFIDENTIAL）。它只在 manifest 里登记，没有建索引；默认的硬件手册仍然是公开版 R01UH1153EJ0110。
 
 目录树只表达文件"归谁管"。一份文档对应多个 device、一块板服务多个 SoM 这类关系，记录在 manifest 里。
 新增 device 的步骤：在 `docs/devices/<新device>/` 下放入文件，在 manifest 中登记，然后重建。
@@ -87,19 +90,19 @@ journalctl --user -u rz-mcp -f            # 查看日志
 
 结构化寄存器目前覆盖 WDT、SCIFA、CPG，其他模块请用 `search_docs` 和 `get_section`。
 
-**BSP 版本与源码**（B1c）。这几个工具读取的是 DL_DIR 里 git 镜像中的官方 rev，不会读 work-shared 下带着 PoC 补丁的源码树：
+**BSP 版本与源码**（B1c）。这几个工具读取的是 DL_DIR 里 git 镜像中的官方 rev，不会读 work-shared 下带着 PoC 补丁的源码树。都有一个可选参数 `project`（Yocto 项目的绝对路径），默认是共用的 rzg3l-bsp-v1：
 
 | 工具 | 用途 |
 |---|---|
-| `get_bsp_release` | 官方 BSP 的信息：各层 pin、TEMPLATECONF、kernel / U-Boot / TF-A 的 rev（会和本地 meta-renesas 对照）、专有包，以及 eMMC 和 QSPI 的写入地址 |
+| `get_bsp_release` | 官方 BSP 的信息：各层 pin、TEMPLATECONF、kernel / U-Boot / TF-A 的 rev（会和本地 meta-renesas 对照）、可选组件（图形、codec、security、multi-os），以及 eMMC 和 QSPI 的写入地址 |
 | `bsp_source` / `bsp_grep` | 读取官方 rev 上的文件或目录，或在其中检索 |
 | `patch_stack` | 各层在官方 rev 之上加了哪些补丁；对于内核，还会把上次构建实际打上的每个提交，对应到出自哪个层的哪个补丁 |
-| `check_build_env` | 对比当前构建配置和官方发布：模板、MACHINE、DISTRO、额外的层及其所属的 PoC、RM_WORK_EXCLUDE、各组件的 pin 和镜像 |
+| `check_build_env` | 先判断目录是不是可用的项目，再对比构建配置和官方发布：可选组件、模板、MACHINE、DISTRO、额外的层及其所属的 PoC、RM_WORK_EXCLUDE、各组件的 pin 和镜像 |
 
 ## Prompt：PoC 工作流
 
 | Prompt | 用途 |
 |---|---|
-| `/rz-docs:poc <名称>` | 推进 RZ/G3L PoC 工作流的第 1～4 步：设想 → v1、v2 → 两轨方案 → 融合 → 用户对齐。它读取 PoC 仓库在磁盘上的状态，告诉主会话下一步做什么 |
+| `/rz-docs:poc <名称> [目录]` | 推进 RZ/G3L PoC 工作流的第 0～6 步：（指定的 Yocto 项目不存在时先搭建）→ 设想 → v1、v2 → 两轨方案 → 融合 → 用户对齐 → 实现、构建 → 写板子、验证 → 打包。它读取磁盘上的状态，告诉主会话下一步做什么 |
 
 工具、模板和子 Agent 的定义都在 [workflow/](workflow/README.md) 下。流程的定义见 `plan/PoC_Workflow_Plan.md`。

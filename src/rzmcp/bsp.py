@@ -29,6 +29,14 @@ def _git(mirror: Path, *args: str, timeout: int = 30) -> subprocess.CompletedPro
     return subprocess.run(["git", f"--git-dir={mirror}", *args], capture_output=True, text=True, timeout=timeout)
 
 
+def _project(project: str | Path | None) -> Path:
+    """The project a tool reads: an explicit absolute directory, else the default one."""
+    p = Y.resolve_project(project)
+    if not p.is_dir():
+        raise ValueError(f"no such Yocto project directory: {p}")
+    return p
+
+
 def component(name: str, rel: dict | None = None, project: Path | None = None) -> dict:
     """The component as pinned by the project's meta-renesas, compared with the release catalog."""
     if name not in COMPONENTS:
@@ -46,10 +54,11 @@ def component(name: str, rel: dict | None = None, project: Path | None = None) -
     return c
 
 
-def get_bsp_release(name: str = Y.DEFAULT_RELEASE) -> str:
+def get_bsp_release(name: str = Y.DEFAULT_RELEASE, project: str | Path | None = None) -> str:
     rel = Y.release(name)
-    project = Y.project_dir()
+    project = _project(project)
     out = [f"{name}: {rel['title']} — device {rel['device']}, MACHINE {rel['machine']}, {rel['yocto']}",
+           f"Checked against the Yocto project {project}",
            f"Source: {rel['source']}", f"Note: {rel['note']}", "", "Layers (git):"]
     for l in rel["layers"]:
         out.append(f"  {l['name']:<18} {l['url']}  {'tag ' + l['tag'] + ' = ' if 'tag' in l else ''}{l['rev']}")
@@ -61,8 +70,12 @@ def get_bsp_release(name: str = Y.DEFAULT_RELEASE) -> str:
         out.append(f"  {n:<7} rev {c['rev']}{(', ' + extra) if extra else ''}{same}")
         out.append(f"          recipe meta-renesas/{c['recipe']}; mirror {c['mirror']} "
                    f"({'has the revision' if c['mirror_has_rev'] else 'MISSING the revision: run a build once'})")
-    out += ["", "Proprietary packages (renesas.com, login; not in git):"]
-    out += [f"  {p['name']:<9} {p['part']} -> {p['layer']} ({p['needed_for']})" for p in rel["proprietary"]]
+    out += ["", "Optional components (installed into a project only when its configuration names one of their "
+            "layers: workflow/build/yocto-project add, or poc-use):"]
+    for c in Y.optional_components(rel):
+        what = (f"{c['part']} {c['version']} (licensed package, rz-mcp/{c['file']}, sha256 {c['sha256'][:12]}...)"
+                if c["kind"] == "package" else f"git {c['url']} tag {c['tag']} = {c['rev'][:12]}")
+        out.append(f"  {c['name']:<9} {what} -> {', '.join(c['layers'])}; {c['needed_for']}")
     m = _media()
     out += ["", "Boot media, Flash Writer " + m.FLASH_WRITER + " (from workflow/board/media.py):",
             "  eMMC boot partition 1 (EM_W): " + "; ".join(f"{f.role} {f.srec} sector {f.dest:#x} load {f.prog:#x}" for f in m.EMMC),
@@ -82,8 +95,8 @@ def _safe_path(path: str) -> str:
     return path
 
 
-def bsp_source(comp: str, path: str, start_line: int = 1, max_lines: int = 300) -> str:
-    c = component(comp)
+def bsp_source(comp: str, path: str, start_line: int = 1, max_lines: int = 300, project: str | Path | None = None) -> str:
+    c = component(comp, project=_project(project))
     mirror, rev = Path(c["mirror_path"]), c["use_rev"]
     path = _safe_path(path)
     head = f"{comp} @ {rev[:12]} ({c['mirror']}) : {path or '/'}"
@@ -103,8 +116,8 @@ def bsp_source(comp: str, path: str, start_line: int = 1, max_lines: int = 300) 
     return f"{head}  lines {start}-{end} of {len(lines)}\n{body[:MAX_CHARS]}{more}"
 
 
-def bsp_grep(comp: str, pattern: str, path: str | None = None, limit: int = 60) -> str:
-    c = component(comp)
+def bsp_grep(comp: str, pattern: str, path: str | None = None, limit: int = 60, project: str | Path | None = None) -> str:
+    c = component(comp, project=_project(project))
     mirror, rev = Path(c["mirror_path"]), c["use_rev"]
     args = ["grep", "-n", "-I", "-E", "-e", pattern, rev]
     if path:
@@ -147,8 +160,8 @@ def active_layers(project: Path) -> list[Path]:
     return Y.bblayers(project / "build" / "conf" / "bblayers.conf", project / "build")
 
 
-def patch_stack(comp: str) -> str:
-    project = Y.project_dir()
+def patch_stack(comp: str, project: str | Path | None = None) -> str:
+    project = _project(project)
     c = component(comp, project=project)
     layers = active_layers(project)
     provided = []                                   # (layer, file, subject)
@@ -191,14 +204,28 @@ def patch_stack(comp: str) -> str:
     return "\n".join(out)
 
 
-def check_build_env() -> str:
-    project = Y.project_dir()
+def check_build_env(project: str | Path | None = None) -> str:
+    project = _project(project)
     build = project / "build"
     rel = Y.release()
     out = [f"Yocto project {project} vs {Y.DEFAULT_RELEASE}"]
 
     def item(level, text):
         out.append(f"  {level:<4} {text}")
+
+    a = Y.assess(project)
+    item({"usable": "OK", "unusable": "FAIL"}.get(a["state"], "WARN"), f"project state: {a['state']}"
+         + (" (workflow/build/yocto-project setup continues it)" if a["state"] == "incomplete" else ""))
+    for p_ in a["problems"]:
+        item("FAIL", p_)
+    if a["state"] != "usable":
+        return "\n".join(out)
+    if not (build / "conf" / "local.conf").exists():
+        item("FAIL", "no build/conf/local.conf: run workflow/build/yocto-project setup " + str(project))
+        return "\n".join(out)
+    for c in Y.optional_components(rel):
+        v = a["components"].get(c["name"])
+        item("INFO", f"optional {c['name']}: {v or 'not installed'}")
 
     conf = build / "conf"
     local = Y.statements((conf / "local.conf").read_text())

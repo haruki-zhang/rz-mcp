@@ -6,3 +6,6 @@ __pycache__/
 data/
 # Raw vendor documents (872 MB, read-only, tracked by catalog/manifest.toml instead)
 docs/
+# Licensed Renesas software packages (graphics / codec / security): read-only, registered with sha256 in
+# catalog/bsp_releases.toml; never commit them and never put them into a PoC delivery
+packages/

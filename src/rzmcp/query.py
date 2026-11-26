@@ -56,8 +56,11 @@ def _doc(doc_id: str) -> sqlite3.Row | None:
 
 
 def _default_hw_manual(device: str) -> str | None:
+    """The device's hardware manual: an indexed one first, then the public edition, then the lowest doc_id."""
     r = db().execute("SELECT d.doc_id FROM document d JOIN document_device dd USING(doc_id) "
-                     "WHERE dd.device=? AND d.doc_type='hw_manual' ORDER BY d.doc_id LIMIT 1", (device,)).fetchone()
+                     "WHERE dd.device=? AND d.doc_type='hw_manual' ORDER BY "
+                     "EXISTS (SELECT 1 FROM section s WHERE s.doc_id=d.doc_id) DESC, "
+                     "(d.confidentiality='public') DESC, d.doc_id LIMIT 1", (device,)).fetchone()
     return r[0] if r else None
 
 
@@ -102,8 +105,11 @@ def list_documents(device: str = "rzg3l", doc_type: str | None = None) -> str:
     for d in rows:
         devs = [r[0] for r in db().execute("SELECT device FROM document_device WHERE doc_id=? AND device!=?",
                                             (d["doc_id"], device))]
+        indexed = db().execute("SELECT 1 FROM chunk WHERE doc_id=? LIMIT 1", (d["doc_id"],)).fetchone()
+        flags = ([d["confidentiality"].upper()] if d["confidentiality"] not in (None, "public") else []) + \
+            ([] if indexed else ["not indexed"])
         out.append(f"{d['doc_id']} | {d['doc_type']} | {d['rev']} | {d['pages'] or '-'} | {d['title']}"
-                   + (f" | also: {', '.join(devs)}" if devs else ""))
+                   + (f" | also: {', '.join(devs)}" if devs else "") + (f" [{', '.join(flags)}]" if flags else ""))
         if d["note"]:
             out.append(f"    note: {d['note']}")
     mods = db().execute("SELECT m.name, m.section_number, m.doc_id, (SELECT COUNT(*) FROM register r WHERE r.module_id=m.module_id) n "

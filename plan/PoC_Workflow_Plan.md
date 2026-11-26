@@ -30,6 +30,7 @@ MCP 服务器的重心从"扩展寄存器覆盖"转向"服务 PoC 开发和 tick
 | 7 | 两个 skill 保持由用户手动调用 | 3.1.1 只作为备查，暂不实施 |
 | 8 | 跳过实验 1，直接搭建流程 | 第 5 节暂缓，保留下来，以后可以作为回归测试。不再需要留出，过去的 G3L PoC 全部入库。改用第 7 节的组件级已知答案测试，再把第一个真实 PoC 当作验收 |
 | 9 | TFTP 和 NFS 走 USB 网卡，主机与 EVK 直连（方案 2）。网卡已经备好 | 见 7.3 |
+| 10 | 共用一个 Yocto 项目仍是基本原则；同时，流程要能按用户指定的目录自主准备 Yocto 环境：目录不存在或为空就自动搭建，已经可用就直接复用。各项目之间不共享缓存。授权软件包放在 rz-mcp 里，按需复制到项目中（2026-11-26） | 见 7.4 |
 
 ## 3. 六步工作流的分工
 
@@ -386,3 +387,40 @@ Tesera 是 RZ/G2L 客户板的 bring-up（`MACHINE=rzg2l-tlc-01`，VLP v4.0.2，
 | 防火墙 | ufw 如果是开启状态，只在这块网卡上放行 DHCP、TFTP 和 NFS |
 | 交付方式 | 提供一个可以重复执行、带撤销功能的脚本，由用户用 sudo 运行 |
 | 验证 | 在网卡有 carrier 时（接上 EVK 并上电）确认：各服务只在 192.168.50.1 上监听；EVK 的 U-Boot 能通过 `dhcp` 和 `tftpboot` 取得内核；Linux 能以 NFS root 启动 |
+
+### 7.4 自主准备 Yocto 项目（决定 10）
+
+**做法**
+
+- `/rz-docs:poc <名称> [目录]`：第二个参数可选。不写时，用上次为这个 PoC 记下的目录（`data/poc-projects.json`），没有就用 rzg3l-bsp-v1。
+- **第 0 步**：先判断目录的状态（`rzmcp.yocto.assess`，只读），分四种：
+  - **不存在或为空**：自动搭建。`.claude/`、`.vscode/` 和 PoC 仓库不算内容。
+  - **上次搭建没有完成**：再运行一次会接着做。
+  - **可用**：直接复用。判定条件是官方模板的各层都在，并且和发布一致：git 仓库核对 rev；tarball 核对内容，即 poky 的 DISTRO_VERSION，以及 meta-renesas 给 kernel、U-Boot、TF-A 定的 pin。
+  - **不可用**：停下，不做任何改动。
+
+  搭建（`workflow/build/yocto-project setup`）按 catalog 拉取四个层并核对 pin，写入 baseline 的 build/conf，再在容器里取回官方源码。搭建期间可以先做第 1 步；第 2 步要等它完成，因为 `bsp_source` 要读这个项目的镜像。
+- **可选组件**登记在 `catalog/bsp_releases.toml` 的 `optional` 里：graphics、codecs、security（授权包，放在 `packages/`，按 sha256 核对）、multi-os（git v4.0.0）。PoC 的 `build-conf/layers` 用到它们时，`poc-use` 会自动安装。
+- MCP 的 BSP 工具都有一个可选参数 `project`。子 Agent 拿到 `$PRJ`；如果是新项目，还会拿到共用项目 `$PAST`，以便读取过去的 PoC。
+
+**已验证（2026-11-26）**
+
+- `eval/test_yocto_project.py` 共 60 项，全部通过：
+  - 四种状态的判定，包括另一个 kernel pin、另一个 poky 版本、容器看不到的目录、正在搭建；
+  - 拒绝时目录不变；
+  - 从包里装出的 graphics、codecs，以及 v4.0.0 的 multi-os，都和 rzg3l-bsp-v1 里的完全一致；
+  - sha256 不一致、包缺失、包里有越界成员时，都会拒绝，并且不写入任何东西；
+  - `poc-use` 自动安装组件，并把 multi-os 的旧路径换成新路径；
+  - prompt 的第 0 步（搭建、接着搭、补全、等待、停下），以及目录的登记。
+- 原有测试全部通过。HTTP 端到端测试增加到 11 项，全部通过。
+- **实机搭建**：在空目录 `/home/mpu-epmaj/max/rz-mcp-selftest/rzg3l-bsp` 上完整跑了一次，成功。
+  - 耗时约 6 分钟（08:49:51～08:55:48），其中取回源码 326 秒；占用 4.3 GB。
+  - 独立核对：
+    - 四个层的 HEAD 和 How To Build 的 pin 完全一致；
+    - `check_build_env` 每一项都是 OK；
+    - 从新项目的镜像里读出的 `rzg2l_wdt.c`、`smarc-rzg3l_defconfig`、TF-A `Makefile`，和 rzg3l-bsp-v1 的逐字相同；
+    - DL_DIR 和 SSTATE_DIR 都在新项目自己的 `build/` 下；
+    - 再运行一次 `setup` 是复用，不改动任何东西；
+    - prompt 对这个目录直接进入第 1 步。
+
+**还没有验证**：在 VS Code 面板里，`/rz-docs:poc` 的第二个参数能否正常传入；新项目第一次完整构建镜像（要几个小时）。
