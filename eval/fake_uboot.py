@@ -288,9 +288,9 @@ class FakeUBoot:
             self.out("SAVE -FLASH.......\nEM_W Complete!\n>")
             fw.update(step="cmd", lines=[])
         else:
-            self.out("Erase SPI Flash memory...\nErase Completed\nWrite to SPI Flash memory.\n"
-                     "======= Qspi Save Information =================\n"
-                     f" SpiFlashMemory Stat Address : H'{lo:08X}\n SpiFlashMemory End Address : H'{hi - 1:08X}\n"
+            self.out("Erase SPI Flash memory...\nErase Completed \nWrite to SPI Flash memory.\n"   # EVK, 2026-11-26
+                     "======= Qspi  Save Information  =================\n"
+                     f" SpiFlashMemory Stat Address : H'{lo:08X}\n SpiFlashMemory End Address  : H'{hi - 1:08X}\n"
                      "===========================================================\n"
                      f" SPI Data Clear(H'FF) Check : H'{fw['dest']:08X}-0000FFFF,Clear OK?(y/n)")
             fw.update(step="clear", lines=[])

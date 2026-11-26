@@ -294,12 +294,13 @@ class Console:
         text = ""
         while True:            # "Clear OK?(y/n)" may come before the erase or after the save information (SUG 4.4)
             i, part = self.expect([r"Clear OK\?\(y/n\)",
-                                   r"Qspi Save Information[\s\S]*?End Address\s*:\s*H'[0-9A-Fa-f]+[\s\S]*?" + FW_PROMPT], 300)
+                                   # the board prints "Qspi  Save Information" (two spaces; 2026-11-26)
+                                   r"Qspi\s+Save\s+Information[\s\S]*?End Address\s*:\s*H'[0-9A-Fa-f]+[\s\S]*?" + FW_PROMPT], 300)
             text += part
             if i == 1:
                 break
             self.send("y")
-            if "Qspi Save Information" in text:
+            if re.search(r"Qspi\s+Save\s+Information", text):
                 text += self.expect([FW_PROMPT], 60)[1]
                 break
         self.wait_label = None
