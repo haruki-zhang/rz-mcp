@@ -1,0 +1,82 @@
+# Recognition test cases (plan 6.1): user-style requests and the rz-dev tools that are a correct FIRST call.
+# expect = []  marks an unrelated request: it must not trigger any tool in `forbid` (set in recognition.py).
+
+[[case]]
+id = "flash-emmc"
+prompt = "把刚构建的镜像烧到 EVK 的 eMMC"
+expect = ["board_flash"]
+
+[[case]]
+id = "board-ok"
+prompt = "板子现在能启动吗"
+expect = ["board_status"]
+
+[[case]]
+id = "reg-wdtset"
+prompt = "WDTSET 寄存器的地址是多少"
+expect = ["lookup_register", "search_registers"]
+
+[[case]]
+id = "yocto-setup"
+prompt = "给 RZ/G3L 搭一个 Yocto 环境"
+expect = ["yocto_status", "yocto_setup"]
+
+[[case]]
+id = "verify"
+prompt = "按 /home/user/wdt/verify.toml 在板子上跑一下验证"
+expect = ["board_verify"]
+
+[[case]]
+id = "build-official"
+prompt = "Build the official RZ/G3L BSP image with bitbake."
+expect = ["poc_build", "yocto_status"]
+
+[[case]]
+id = "poc-new"
+prompt = "我想做一个 PoC：RZ/G3L 的看门狗超时后系统自动重启。帮我开始吧。"
+expect = ["poc_create", "yocto_status", "poc_status"]
+
+[[case]]
+id = "flash-qspi-bl"
+prompt = "Write the bootloader to the QSPI flash on the EVK so it boots from QSPI."
+expect = ["board_flash"]
+
+[[case]]
+id = "uboot-cmd"
+prompt = "在 U-Boot 里执行 mmc info 看看 eMMC 的信息"
+expect = ["board_exec"]
+
+[[case]]
+id = "job-progress"
+prompt = "刚才的写板怎么样了？"
+expect = ["job_status"]
+
+[[case]]
+id = "poc-progress"
+prompt = "PoC wdt-reboot 现在进行到哪一步了，下一步该做什么？"
+expect = ["poc_status"]
+
+[[case]]
+id = "poc-package"
+prompt = "把 PoC wdt-reboot 打包成交付物"
+expect = ["poc_package", "poc_status"]
+
+[[case]]
+id = "doc-bootmode"
+prompt = "What are the boot mode pin settings for eMMC boot on the RZ/G3L SMARC EVK?"
+expect = ["search_docs", "get_section", "list_documents"]
+
+[[case]]
+id = "neg-sort"
+prompt = "用 Python 写一个快速排序函数，直接把代码贴给我就行。"
+expect = []
+
+[[case]]
+id = "neg-git"
+prompt = "Explain the difference between git rebase and git merge in two sentences."
+expect = []
+
+[[case]]
+id = "neg-flash-word"
+prompt = "Adobe Flash 是什么时候停止支持的？"
+expect = []

@@ -1,4 +1,4 @@
-"""MCP server exposing the RZ documentation database.
+"""rz-dev MCP server: RZ/G3L documentation lookup plus the Yocto, PoC, board and job tools (devtools.py).
 
     # localhost (Streamable HTTP, bearer-token protected) — default; URL http://localhost:8765/mcp
     python -m rzmcp.server --transport http --port 8765
@@ -8,7 +8,7 @@
     python -m rzmcp.server --transport stdio
 
 Token: $RZ_MCP_TOKEN, else data/.token (created on first start, mode 600).
-Every tool call is appended to data/calls.jsonl (tool, args, size, duration) for later review.
+Every tool call is appended to data/calls.jsonl (or --call-log) (tool, args, size, duration) for later review.
 """
 # no `from __future__ import annotations`: MCPServer builds tool schemas from the real annotation objects
 import argparse
@@ -29,23 +29,43 @@ from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from . import DB_PATH, ROOT
+from . import devtools
 from . import query as Q
 
+SERVER_NAME = "rz-dev"
 LOG_PATH = ROOT / "data" / "calls.jsonl"
 
 INSTRUCTIONS = """\
-Renesas RZ documentation server (pilot: RZ/G3L). Indexed: RZ/G3L hardware manual (HW UM, public edition), \
-datasheet, app notes, EVK quick start guide, SMARC module / Carrier Board II manuals, schematics and BOMs, \
-and RZ Linux device-driver manuals.
+rz-dev: Renesas RZ/G3L development server on this host: documentation lookup, the Yocto build environment, \
+PoC projects, and flashing and verifying the RZ/G3L EVK board. 瑞萨 RZ/G3L 开发：查资料、Yocto 构建、PoC、烧录和上板验证。
 
-How to use:
-- Register questions for structured modules (WDT, SCIFA, CPG): lookup_register / search_registers give exact \
-offsets, absolute addresses, reset values and bit fields.
-- Everything else (other modules, procedures, electrical values, boards, Linux drivers): search_docs, then \
-get_section or read_pages to read the actual text before answering.
-- Documents are English; search with English keywords and register/module abbreviations.
-- Always cite doc_id, Rev and page numbers from the tool output. Page numbers are PDF page indices.
-- If a tool reports that something is not found, say so. Do not fill in register values from memory.
+Pick the tool by what the user wants:
+- Chip or board facts (registers, pins, boot modes, electrical values, procedures, Linux drivers; 查资料、寄存器、\
+手册): list_documents, search_docs, get_toc, get_section, read_pages, lookup_register, search_registers.
+- Yocto / BSP environment, where the kernel / U-Boot / TF-A sources are (搭环境、Yocto、BSP、源码在哪): yocto_status; \
+yocto_setup if it is missing or broken or an optional component is needed. Read BSP sources directly with your \
+file tools at the paths yocto_status returns.
+- Build an image (构建、编译、bitbake): poc_build.
+- Flash the EVK (烧录、烧写、写板、刷机、flash、eMMC、QSPI、bootloader、rootfs): board_flash. Board state or \
+connection (板子状态): board_status. One command on the board in U-Boot or Linux: board_exec. board_flash, \
+board_verify and board_exec check the host and the board themselves; call them directly. board_flash without \
+an image path flashes the newest built image.
+- Verify or test on the board (上板验证、测试): board_verify.
+- PoC / proof of concept / demo (概念验证、演示): poc_create to start one, poc_status to see where a PoC is and \
+which tool comes next, poc_package for the delivery package.
+- yocto_setup, poc_build, poc_package, board_flash and board_verify are background jobs: they return a job_id at \
+once; call job_status(job_id, wait_seconds=50) again and again until the job ends. job_cancel stops a job.
+
+Rules:
+- When a job is waiting_human, tell the user its instruction word for word (a DIP switch or power operation), \
+then keep polling job_status; the user does not reply, the tool detects the operation on the serial console.
+- Every tool works on its own; pass PoC names or absolute paths. Each result says which tool to call next.
+- PoC flow: yocto_status -> poc_create, research, write the design and verification plan -> the user confirms the \
+design (the only decision point) -> implement in the PoC layer, poc_build -> board_flash, board_verify -> write \
+the docs, poc_package.
+- Documents are English: search with English keywords and register/module abbreviations. Cite doc_id, Rev and \
+page numbers (PDF page indices) from the tool output. Structured registers cover WDT, SCIFA, CPG; for other \
+modules use search_docs and get_section. If something is not found, say so; never fill in values from memory.
 """
 
 DeviceArg = Annotated[str, Field(description="Device id, e.g. 'rzg3l' (default). Filters documents that apply to this device.")]
@@ -77,8 +97,8 @@ def _logged(fn):
 
 
 def build_server() -> MCPServer:
-    mcp = MCPServer(name="rz-docs", instructions=INSTRUCTIONS, version="0.1.0")
-    # plain-text results only (no structuredContent wrapper); all tools are read-only lookups
+    mcp = MCPServer(name=SERVER_NAME, instructions=INSTRUCTIONS, version="0.2.0")
+    # plain-text results only (no structuredContent wrapper)
     ro = {"annotations": ToolAnnotations(read_only_hint=True, open_world_hint=False), "structured_output": False}
 
     @mcp.tool(**ro)
@@ -153,6 +173,7 @@ def build_server() -> MCPServer:
         CPG). Returns candidate registers with offset and section; follow up with lookup_register."""
         return Q.search_registers(query=query, device=device, module=module, limit=limit)
 
+    devtools.register(mcp, _logged)
     return mcp
 
 
@@ -207,6 +228,7 @@ def local_hosts() -> list[str]:
 
 
 def main() -> None:
+    global LOG_PATH
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--transport", choices=["http", "stdio"], default="http")
     ap.add_argument("--host", default="127.0.0.1", help="bind address (default: localhost only; 0.0.0.0 = all interfaces)")
@@ -214,9 +236,11 @@ def main() -> None:
     ap.add_argument("--allowed-host", action="append", default=[],
                     help="extra Host-header name clients may use (repeatable), e.g. a DNS alias of this PC")
     ap.add_argument("--db", type=Path, default=DB_PATH)
+    ap.add_argument("--call-log", type=Path, default=LOG_PATH, help="where tool calls are logged (JSON lines)")
     a = ap.parse_args()
     if not a.db.exists():
         sys.exit(f"database {a.db} not found — run: python -m rzmcp.build_fulltext && python -m rzmcp.build_registers")
+    LOG_PATH = a.call_log
     Q.set_db(a.db)
     mcp = build_server()
     if a.transport == "stdio":
@@ -233,9 +257,9 @@ def main() -> None:
     app = mcp.streamable_http_app(stateless_http=True, json_response=True, transport_security=security, host=a.host)
     ip = lan_ip() if a.host in ("0.0.0.0", "") else "localhost" if a.host in ("127.0.0.1", "::1") else a.host
     url = f"http://{ip}:{a.port}/mcp"
-    print(f"rz-docs MCP server: {url}  (accepted Host names: {', '.join(hosts)})\n"
+    print(f"{SERVER_NAME} MCP server: {url}  (accepted Host names: {', '.join(hosts)})\n"
           f"Add it in Claude Code:\n"
-          f"  claude mcp add --scope user --transport http rz-docs {url} --header \"Authorization: Bearer <token in data/.token>\"\n",
+          f"  claude mcp add --scope user --transport http {SERVER_NAME} {url} --header \"Authorization: Bearer <token in data/.token>\"\n",
           file=sys.stderr)
     # a client that keeps a stream open must not hold a restart for systemd's 90 s stop timeout
     uvicorn.run(BearerAuth(app, token), host=a.host, port=a.port, log_level="info", timeout_graceful_shutdown=5)

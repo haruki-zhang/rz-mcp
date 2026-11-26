@@ -1,4 +1,4 @@
-# systemd *user* unit for the rz-docs MCP server (localhost only, Streamable HTTP, bearer token in data/.token).
+# systemd *user* unit for the rz-dev MCP server (localhost only, Streamable HTTP, bearer token in data/.token).
 # Bound to 127.0.0.1 because the company MCP allowlist only permits localhost URLs; clients on this PC
 # (incl. VS Code Remote-SSH windows, where Claude Code runs here) use http://localhost:8765/mcp.
 #
@@ -13,7 +13,7 @@
 # session ends.
 
 [Unit]
-Description=rz-docs MCP server (RZ documentation, localhost)
+Description=rz-dev MCP server (RZ/G3L docs, Yocto, PoC, board; localhost)
 Documentation=file:///home/mpu-epmaj/max/workspace/rz-mcp/README.md
 
 [Service]
@@ -24,6 +24,8 @@ Environment=PYTHONUNBUFFERED=1
 Restart=on-failure
 RestartSec=5
 
+# Jobs (builds, flashing) run as their own transient units (systemd-run --user), so these limits and a
+# service restart do not affect them.
 # Yield to heavy jobs (Yocto builds) on this PC. Measured footprint: ~80 MB RSS, ~0% CPU when idle.
 Nice=10
 CPUWeight=20

@@ -9,3 +9,5 @@ docs/
 # Licensed Renesas software packages (graphics / codec / security): read-only, registered with sha256 in
 # catalog/bsp_releases.toml; never commit them and never put them into a PoC delivery
 packages/
+# Machine configuration (template: config.example.toml)
+config.toml

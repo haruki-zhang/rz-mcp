@@ -1,0 +1,27 @@
+# rz-mcp machine configuration. Copy to config.toml (git-ignored) and adjust to this host.
+# Every machine-specific value lives here; the code has no hard-coded host paths.
+# Relative paths are resolved against the rz-mcp repository root.
+
+[yocto]
+# The one Yocto project shared by all PoCs. yocto_setup creates it here if it does not exist.
+project = "/path/to/rzg3l-bsp"
+# Docker container (Ubuntu 22.04) that runs bitbake; it must bind-mount `project` at the same path.
+container = "ubuntu22.04-yocto"
+# Image built when poc_build is called without an image name.
+default_image = "core-image-minimal"
+# Licensed Renesas packages (graphics / codecs / security / multi-os). Never copied into a delivery.
+packages = "packages"
+
+[poc]
+# PoC repositories are created under this directory (one sub-directory per PoC).
+root = "/path/to/rz-poc"
+
+[board]
+# Serial console of the EVK ("UART Debug" micro-USB). A stable udev symlink is best.
+serial = "/dev/rzg3l-evk-console"
+baud = 115200
+# USB network adapter wired directly to the EVK, and the static addresses on that link.
+nic = "enxXXXXXXXXXXXX"
+host_ip = "192.168.50.1"
+board_ip = "192.168.50.2"
+tftp_root = "/srv/tftp"
