@@ -30,8 +30,6 @@ from pydantic import Field
 
 from . import DB_PATH, ROOT
 from . import query as Q
-from . import workflow as W
-from . import bsp as B
 
 LOG_PATH = ROOT / "data" / "calls.jsonl"
 
@@ -48,13 +46,6 @@ get_section or read_pages to read the actual text before answering.
 - Documents are English; search with English keywords and register/module abbreviations.
 - Always cite doc_id, Rev and page numbers from the tool output. Page numbers are PDF page indices.
 - If a tool reports that something is not found, say so. Do not fill in register values from memory.
-
-BSP source and build facts (RZ/G3L BSP Plus, official configuration, never a PoC's patched tree):
-- bsp_source / bsp_grep: default view "release" = upstream revision + the patches the official configuration applies (meta-renesas, installed optional components), i.e. what is compiled. view="rev" = bare upstream. Components: kernel, u-boot, tf-a, out-of-tree modules (mmngr, vspm, vspmif, mali, uvcs, ...), layers (meta-renesas, poky, ...); an unknown component name lists what is available.
-- "Is it enabled / compiled / is this DT node on?": build_facts (kernel/U-Boot .config, compiled objects, the compiled device tree). Do not infer these from Kconfig defaults, defconfigs or a single .dtsi.
-- Recipe variables (SRC_URI, KBUILD_DEFCONFIG, UBOOT_CONFIG, EXTRA_OEMAKE ...): bsp_recipe, with where each was set.
-- patch_stack lists exactly which patches the official configuration applies.
-- Read a function to its end before concluding what it does (bsp_source warns when the window stops inside a block).
 """
 
 DeviceArg = Annotated[str, Field(description="Device id, e.g. 'rzg3l' (default). Filters documents that apply to this device.")]
@@ -161,90 +152,6 @@ def build_server() -> MCPServer:
         """Find registers / bit fields by function or partial name within the structured modules (WDT, SCIFA,
         CPG). Returns candidate registers with offset and section; follow up with lookup_register."""
         return Q.search_registers(query=query, device=device, module=module, limit=limit)
-
-    CompArg = Annotated[str, Field(description="Component: 'kernel' (rz_linux-cip), 'u-boot' (renesas-u-boot-cip), 'tf-a' (rzg_trusted-firmware-a); with a snapshot also out-of-tree modules ('mmngr', 'mmngrbuf', 'vspm', 'vspmif', 'mali', 'uvcs', 'optee-os', 'open-amp', 'libmetal') and layers ('meta-renesas', 'poky', 'meta-arm', 'meta-openembedded', 'meta-rz-graphics', ...)")]
-    ViewArg = Annotated[str, Field(description="'release' (default): the revision plus the patches the official configuration applies = what is compiled. 'rev': the bare upstream revision / tarball")]
-    ProjArg = Annotated[Optional[str], Field(description="Yocto project directory (absolute path). Default: the shared project rzg3l-bsp-v1. Pass the PoC's project when it lives in another one")]
-
-    @mcp.tool(**ro)
-    @_logged
-    def get_bsp_release(release: Annotated[str, Field(description="Release id; default the RZ/G3L BSP Plus release")] = "RZG3L-BSP-1.0.0",
-                        project: ProjArg = None) -> str:
-        """The RZ/G3L BSP release as Renesas publishes it: git layer pins, TEMPLATECONF, the kernel / U-Boot / TF-A
-        revisions meta-renesas pins for rzg3l-family (checked against the Yocto project), proprietary packages,
-        and the boot media layout (eMMC boot partition sectors, EXT_CSD, QSPI addresses, SW_MODE)."""
-        return B.get_bsp_release(release, project)
-
-    @mcp.tool(**ro)
-    @_logged
-    def bsp_source(component: CompArg,
-                   path: Annotated[str, Field(description="Path in the repository, e.g. 'drivers/watchdog/rzg2l_wdt.c', 'arch/arm64/boot/dts/renesas', 'configs/smarc-rzg3l_defconfig'. A directory lists its entries.")],
-                   start_line: Annotated[int, Field(description="First line to return")] = 1,
-                   max_lines: Annotated[int, Field(description="Lines to return (max 2000)")] = 300,
-                   project: ProjArg = None, view: ViewArg = "release") -> str:
-        """Read a file (or list a directory) of the OFFICIAL source as the release compiles it (view 'release':
-        revision + official layer patches; 'rev': bare upstream). Says which official patch changed the file, and
-        warns when the window ends inside a function. Use this instead of build/tmp/work*, which carry PoC patches."""
-        return B.bsp_source(component, path, start_line, max_lines, project, view)
-
-    @mcp.tool(**ro)
-    @_logged
-    def bsp_grep(component: CompArg,
-                 pattern: Annotated[str, Field(description="Extended regular expression, e.g. 'renesas,r9a08g046' or 'rzg2l_wdt_probe'")],
-                 path: Annotated[Optional[str], Field(description="Optional path(s) to search in, separated by spaces: directories, files or globs, e.g. 'drivers/net' or 'env/common.c lib/hashtable.c'. A path that does not exist is an error (never a silent 'no hits'); a partial name is used as a prefix")] = None,
-                 limit: Annotated[int, Field(description="Max hits (1-300)")] = 60,
-                 project: ProjArg = None, view: ViewArg = "release") -> str:
-        """git grep in the OFFICIAL source as the release compiles it (view 'release', default) or the bare upstream
-        revision ('rev'). Returns path:line: text."""
-        return B.bsp_grep(component, pattern, path, limit, project, view)
-
-    @mcp.tool(**ro)
-    @_logged
-    def patch_stack(component: CompArg, project: ProjArg = None) -> str:
-        """Exactly which patches and config fragments the OFFICIAL configuration applies on top of the revision
-        (the recipe's resolved SRC_URI, in order, with layer and changed files); then, separately, what PoC / extra
-        layers of this project add, and for the kernel the commits this project's last build applied."""
-        return B.patch_stack(component, project)
-
-    @mcp.tool(**ro)
-    @_logged
-    def build_facts(kind: Annotated[str, Field(description="'config': .config symbols; 'compiled': is a source file compiled (path like 'drivers/net/can/rcar/rcar_canfd.c') or compiled objects matching a regex; 'dt': a node of the compiled device tree by label ('sdhi2'), node name ('i3c'), path or compatible")],
-                    query: Annotated[str, Field(description="Symbol regex (with or without CONFIG_), source path / regex, or DT label / node / compatible")],
-                    component: Annotated[str, Field(description="For kind=config: 'kernel' (default) or 'u-boot'")] = "kernel",
-                    project: ProjArg = None) -> str:
-        """Facts of the OFFICIAL build (release + installed optional components, built in a scratch directory; no PoC
-        layer): kernel / U-Boot .config values, which source files are compiled, and the compiled device tree with
-        every node's final status (includes, &label overrides and #if switches resolved). Answers "is X enabled /
-        compiled / on" — do not infer these from Kconfig defaults, defconfigs or one .dtsi."""
-        return B.build_facts(kind, query, component, project)
-
-    @mcp.tool(**ro)
-    @_logged
-    def bsp_recipe(recipe: Annotated[str, Field(description="Recipe, e.g. 'linux-renesas', 'u-boot', 'trusted-firmware-a', 'kernel-module-mali', 'busybox', 'systemd', 'core-image-minimal'")],
-                   pattern: Annotated[str, Field(description="Regex on variable names, e.g. '^SRC_URI$', 'KBUILD_DEFCONFIG|KERNEL_DEVICETREE', 'EXTRA_OEMAKE', 'PACKAGECONFIG'")],
-                   project: ProjArg = None) -> str:
-        """Resolved variables of a recipe in the OFFICIAL configuration (bitbake -e) with the file:line of every
-        operation that set them — instead of reading .bb / .bbappend / .conf files by hand."""
-        return B.bsp_recipe(recipe, pattern, project)
-
-    @mcp.tool(**ro)
-    @_logged
-    def check_build_env(project: ProjArg = None) -> str:
-        """Compare the Yocto project's build configuration with the BSP release: whether the directory is a usable
-        project at all, optional components (graphics, codecs, security, multi-os), TEMPLATECONF, MACHINE, DISTRO,
-        official and extra layers (and which PoC repository owns each), RM_WORK_EXCLUDE, layer checkouts,
-        component revisions and git mirrors, whether bitbake is running."""
-        return B.check_build_env(project)
-
-    @mcp.prompt(name="poc", title="RZ/G3L PoC workflow (steps 1-6)",
-                description="推进 RZ/G3L PoC 工作流的第 1～6 步：设想 → v1/v2 → 两轨方案 → 融合 → 对齐 → 实现、构建 → 写板子、验证 → 打包。"
-                            "参数：PoC 名称（一个词，例如 lowpower-display）；可选的第二个参数是 Yocto 项目目录（绝对路径），"
-                            "不存在或为空时会先自动搭建，已经可用时直接复用；不写则用上次为这个 PoC 指定的目录，否则用共用的 rzg3l-bsp-v1。"
-                            "每完成一步再运行一次即可继续。")
-    @_logged
-    def poc(name: str, project: str = "") -> str:
-        """Steps 1-6 of the PoC workflow; reads the PoC repository state and returns the next step."""
-        return W.poc_prompt(name, project)
 
     return mcp
 

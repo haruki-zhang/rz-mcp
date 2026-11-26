@@ -138,7 +138,7 @@ index = ["fulltext"]
 outline = "bookmarks"
 note = """Release candidate (Rev.1.00-rc1, Jan. 2026); replace with the final revision when available. Building, \
 writing the boot media (SCIF download mode, Flash Writer, eMMC / QSPI addresses), official boot logs, switch \
-settings. workflow/board/media.py cites it as SUG. Copied 2026-11-26 from rzg3l-bsp-v1/ (sha256 070bf559...)."""
+settings. Copied 2026-11-26 from rzg3l-bsp-v1/ (sha256 070bf559...)."""
 
 [[documents]]
 id = "R01UH1193EJ0100"

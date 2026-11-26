@@ -1,4 +1,0 @@
-# Prebuilt image exceeds GitHub 100 MB limit; distribute via GitHub Releases
-image/*.wic.gz
-# Packages made by workflow/build/poc-package
-dist/
