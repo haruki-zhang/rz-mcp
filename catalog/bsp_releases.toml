@@ -12,6 +12,8 @@ poky_version = "5.0.14"           # DISTRO_VERSION in poky/meta-poky/conf/distro
 template = "meta-renesas/meta-rz-distro/conf/templates/bsp-plus-conf"
 source = "https://renesas-rz.github.io/rz_linux_bsp_plus/RZG/how_to_build_linux_bsp_plus/ (RZ/G3L, RZ/G3SE tab; read 2026-11-25)"
 note = "meta-renesas tag RZG3L-BSP-1.0.0 is the same commit as BSP-PLUS-K6.12-V4.0 (git ls-remote, 2026-11-25)"
+# recipes whose resolved variables (bitbake -e) the snapshot keeps for bsp_recipe, without serving their source
+sources_env_only = ["firmware-pack", "busybox", "systemd", "core-image-minimal"]
 
 layers = [
   { name = "poky", url = "https://git.yoctoproject.org/git/poky", rev = "7e8674996b0164b07e56bc066d0fba790e627061" },
@@ -80,6 +82,26 @@ needed_for = "CM33 firmware loaded by BL2 (RZ_CM33_FIRMWARE_LOAD), OpenAMP sampl
 source = "https://github.com/renesas-rz/meta-rz-multi-os, commit 'Add RZ/G3L support for Multi-OS with BSP-PLUS-K6.12-V4.0' (tag v4.0.0)"
 verified = "2026-11-26: meta-rzg3l at v4.0.0 is identical to rzg3l-bsp-v1/meta-rz-features/meta-rz-multi-os/meta-rzg/meta-rzg3l"
 note = "rzg3l-bsp-v1 has an older (pre-git) layout, meta-rz-multi-os/meta-rzg/meta-rzg3l: a PoC's build-conf/layers written there names that path"
+
+# Sources served by bsp_source / bsp_grep (component = recipe), from the snapshot workflow/build/src-snapshot takes
+# of the OFFICIAL configuration (release layers + installed optional components, no PoC layer). A recipe the
+# configuration does not provide (its optional component is not installed) is skipped. Kind is detected from the
+# resolved SRC_URI: git (mirror in DL_DIR), tar (tarball in a layer) or binary (prebuilt, no source).
+[releases."RZG3L-BSP-1.0.0".sources]
+kernel = "linux-renesas"
+u-boot = "u-boot"
+tf-a = "trusted-firmware-a"
+flash-writer = "flash-writer"
+mmngr = "kernel-module-mmngr"
+mmngrbuf = "kernel-module-mmngrbuf"
+vspm = "kernel-module-vspm"
+vspmif = "kernel-module-vspmif"
+mali = "kernel-module-mali"            # graphics
+uvcs = "kernel-module-uvcs-drv"        # codecs
+cm33-firmware = "cm33-firmware"        # multi-os
+open-amp = "open-amp"                  # multi-os
+libmetal = "libmetal"                  # multi-os
+optee-os = "optee-os"                  # security
 
 [releases."RZG3L-BSP-1.0.0".components.kernel]
 recipe = "meta-rz-bsp/recipes-kernel/linux/linux-renesas_6.12.bb"

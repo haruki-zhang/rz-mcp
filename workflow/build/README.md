@@ -14,6 +14,7 @@
 | `poc-use --baseline` | 只用官方模板和标准项 |
 | `poc-build <target> [--task populate_sdk]` | 在 `max-ubuntu22.04` 容器里以 `nice` 运行 bitbake（主机是 26.04，BSP 只在 22.04 上测过）。会写 `data/build-runs/<时间>-<target>/`，里面有 `bitbake.log` 和 `report.json`：使用的配置、任务统计、错误、新生成的文件 |
 | `poc-env [--project DIR] <命令…>` | 在容器里加载 BitBake 环境后执行一条命令，例如 `devtool modify linux-renesas`、`devtool finish linux-renesas ../rzg3l-<名称>/layers/meta-rzg3l-<名称>`、`bitbake -e`。参数以列表的形式原样传入，不经过 shell。bitbake 正在运行时，拒绝执行 bitbake 和 devtool 命令 |
+| `src-snapshot [--project DIR] [--artifacts]` | 给项目拍源码快照，供 `bsp_source`、`bsp_grep`、`patch_stack`、`build_facts`、`bsp_recipe` 使用：用官方配置（发布的层加上已安装的可选组件，不含 PoC 层）运行 `bitbake -e`，生成补丁后的源码视图；加 `--artifacts` 时，在临时目录里编译内核、配置 U-Boot，保留 `.config`、编译对象清单和设备树。不写入项目。约 2 分钟，加 `--artifacts` 约 10 分钟。搭建项目或安装可选组件后要重新运行 |
 | `poc-package <poc> --image <x>.wic.gz` | 生成 `<poc>/dist/<repo>-<版本>/`，内容是 README、docs（md 和 pdf）、layers、image、tools，另加 `versions.json` 和 `SHA256SUMS`。不包含 `design/`、`build-conf/`、`.git`。仓库还是空骨架时拒绝打包 |
 
 ## 可选组件

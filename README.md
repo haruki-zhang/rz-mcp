@@ -90,14 +90,18 @@ journalctl --user -u rz-mcp -f            # 查看日志
 
 结构化寄存器目前覆盖 WDT、SCIFA、CPG，其他模块请用 `search_docs` 和 `get_section`。
 
-**BSP 版本与源码**（B1c）。这几个工具读取的是 DL_DIR 里 git 镜像中的官方 rev，不会读 work-shared 下带着 PoC 补丁的源码树。都有一个可选参数 `project`（Yocto 项目的绝对路径），默认是共用的 rzg3l-bsp-v1：
+**BSP 版本与源码**（B1c；源码快照见下）。源码不会从 work-shared 或 tmp/work 下读：那里是 PoC 构建打过补丁的树。都有一个可选参数 `project`（Yocto 项目的绝对路径），默认是共用的 rzg3l-bsp-v1：
 
 | 工具 | 用途 |
 |---|---|
 | `get_bsp_release` | 官方 BSP 的信息：各层 pin、TEMPLATECONF、kernel / U-Boot / TF-A 的 rev（会和本地 meta-renesas 对照）、可选组件（图形、codec、security、multi-os），以及 eMMC 和 QSPI 的写入地址 |
-| `bsp_source` / `bsp_grep` | 读取官方 rev 上的文件或目录，或在其中检索 |
-| `patch_stack` | 各层在官方 rev 之上加了哪些补丁；对于内核，还会把上次构建实际打上的每个提交，对应到出自哪个层的哪个补丁 |
-| `check_build_env` | 先判断目录是不是可用的项目，再对比构建配置和官方发布：可选组件、模板、MACHINE、DISTRO、额外的层及其所属的 PoC、RM_WORK_EXCLUDE、各组件的 pin 和镜像 |
+| `bsp_source` / `bsp_grep` | 读取或检索源码。默认视图 `release` = 上游 rev + 官方配置实际打上的补丁（meta-renesas 和已安装的可选组件），也就是实际编译的代码；`view="rev"` 是不带任何层补丁的上游。组件：kernel、u-boot、tf-a，有快照时还有树外模块（mmngr、vspm、vspmif、mali、uvcs……）和层（meta-renesas、poky……）。路径不存在时报错，不会显示成"没有命中"；读取窗口停在函数中间时会提醒 |
+| `patch_stack` | 官方配置在 rev 之上实际打的补丁和配置片段（来自 `bitbake -e` 解析后的 SRC_URI，按顺序列出，带所属层和改动的文件）；另列本项目的 PoC 层提供的补丁；内核还会追溯本项目上次构建实际打上的每个提交 |
+| `build_facts` | 官方构建的事实：内核 / U-Boot 的 `.config`、某个源文件是否被编译、编译后的设备树（每个节点的最终 status，include、`&label` 覆盖和 `#if` 开关都已展开） |
+| `bsp_recipe` | 某个 recipe 在官方配置下解析后的变量（SRC_URI、KBUILD_DEFCONFIG、UBOOT_CONFIG、EXTRA_OEMAKE……），以及每次赋值所在的文件和行号 |
+| `check_build_env` | 先判断目录是不是可用的项目，再对比构建配置和官方发布：可选组件、模板、MACHINE、DISTRO、额外的层及其所属的 PoC、RM_WORK_EXCLUDE、各组件的 pin 和镜像、源码快照是否存在、是否过期 |
+
+**源码快照**：`workflow/build/src-snapshot --project <项目> [--artifacts]`，约 2 分钟，加 `--artifacts` 后约 10 分钟。它在 `data/snapshots/<项目>/build` 里用官方配置（发布的层加上已安装的可选组件，不含 PoC 层）运行 `bitbake -e`，生成各组件的 release 视图（git tree 对象，经核对与 bitbake do_patch 的结果逐字节一致）。加 `--artifacts` 时，还在临时 TMPDIR 里编译内核、配置 U-Boot，只保留 `.config`、编译对象清单和设备树，临时目录用完即删。整个过程不会写入项目：DL_DIR 和 sstate-cache 只通过 PREMIRRORS / SSTATE_MIRRORS 读取，git 镜像里已有的对象也不会重写。层或可选组件变化后，快照会被标为过期，`check_build_env` 和各工具都会提示。设计依据和实验数据见 [plan/Source_Evidence_Decision.md](plan/Source_Evidence_Decision.md)。
 
 ## Prompt：PoC 工作流
 

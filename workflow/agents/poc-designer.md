@@ -47,13 +47,15 @@ disallowedTools: Agent
   - 引用前必须读过原文，不能只凭检索结果里的片段。
 - **官方源码和版本**：用 MCP 的 rz-docs 工具，不要自己去拼 git 命令。
   - `get_bsp_release`：查官方 BSP 的各层 pin、kernel / U-Boot / TF-A 的 rev、可选组件（图形、codec、security、multi-os），以及 eMMC 和 QSPI 的写入地址；
-  - `bsp_source`：读官方 rev 上的某个文件，或者列出某个目录；
-  - `bsp_grep`：在官方源码里检索；
-  - `patch_stack`：看各个层在官方 rev 之上加了哪些补丁，每个补丁出自哪个层、哪个 PoC；
-  - `check_build_env`：看当前的构建配置和官方发布有哪些不同。
+  - `bsp_source`：读某个文件，或者列出某个目录。默认视图 `release` 是官方实际编译的代码（rev 加上 meta-renesas 和可选组件的补丁）；`view="rev"` 是不带补丁的上游。读函数时要读到函数结束，工具提示窗口停在块中间时，接着往下读；
+  - `bsp_grep`：在源码里检索。组件除了 kernel、u-boot、tf-a，还有树外模块（mmngr、vspm、vspmif、mali、uvcs……）和层（meta-renesas、poky……）；
+  - `build_facts`：**"是否启用 / 是否编译 / 这个 DT 节点开没开"一律用它回答**：官方构建的内核和 U-Boot `.config`、哪些源文件被编译、编译后的设备树（include、`&label` 覆盖和 `#if` 都已展开）。不要根据 Kconfig 默认值、defconfig 或单个 .dtsi 去推断；
+  - `bsp_recipe`：recipe 解析后的变量（SRC_URI、KBUILD_DEFCONFIG、UBOOT_CONFIG、EXTRA_OEMAKE……），以及每次赋值所在的文件和行号，不必手工去读 .bb、.bbappend；
+  - `patch_stack`：官方配置在 rev 之上实际打了哪些补丁（按顺序，带层和改动的文件），以及本项目的 PoC 层另外提供了什么；
+  - `check_build_env`：看当前的构建配置和官方发布有哪些不同，以及源码快照是否存在、是否过期。快照缺失或过期时，告诉主会话运行 `workflow/build/src-snapshot --project $PRJ --artifacts`。
 
-  这些工具读取的是 DL_DIR 里 git 镜像中的官方 rev，引用时写成 `仓库:路径:行@rev`（rev 取前 12 位）。
-  调用 `get_bsp_release`、`bsp_source`、`bsp_grep`、`patch_stack`、`check_build_env` 时，**总是把 `$PRJ` 作为 `project` 参数传入**，这样读到的才是这个 PoC 所在项目的镜像和配置。
+  引用源码时写成 `组件:路径:行@rev`（rev 取前 12 位），视图是 release 且文件被官方补丁改过时，注明补丁名；引用 `build_facts` 时注明"官方构建"。
+  调用以上工具时，**总是把 `$PRJ` 作为 `project` 参数传入**，这样读到的才是这个 PoC 所在项目的镜像和配置。
 - **过去的 PoC**：`$PRJ` 下的其他 PoC 仓库；给了 `$PAST` 的话，还有 `$PAST` 下的 PoC 仓库，例如 `rzg3l-lowpower-display`、`rzg3l-fast-boot-seamless-logo`、`MultiCore-Display`。它们的文档、层和补丁都可以读，引用时写明"过去 PoC"。
 - **不要把 `$PRJ/build/tmp/work-shared/` 当作官方源码。** 它是最近一次构建的结果，带着其他 PoC 的补丁。如果确实要看，必须在引用时注明"某 PoC 修改后的树"。
 

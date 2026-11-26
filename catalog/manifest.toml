@@ -125,6 +125,22 @@ index = ["fulltext"]
 outline = "bookmarks"
 
 [[documents]]
+id = "R01US0858EJ0100"
+title = "RZ/G3L Linux Start-up Guide (RZ/G3L-EVKIT)"
+doc_type = "quick_start"
+rev = "1.00-rc1"
+path = "docs/boards/rzg3l-evk/r01us0858ej0100-rzg3l-linux-start-up-guide-rc1.pdf"
+pages = 48
+devices = ["rzg3l"]
+boards = ["rzg3l-evk"]
+confidentiality = "public"        # no CONFIDENTIAL marking on any page (checked 2026-11-26)
+index = ["fulltext"]
+outline = "bookmarks"
+note = """Release candidate (Rev.1.00-rc1, Jan. 2026); replace with the final revision when available. Building, \
+writing the boot media (SCIF download mode, Flash Writer, eMMC / QSPI addresses), official boot logs, switch \
+settings. workflow/board/media.py cites it as SUG. Copied 2026-11-26 from rzg3l-bsp-v1/ (sha256 070bf559...)."""
+
+[[documents]]
 id = "R01UH1193EJ0100"
 title = "RZ/G3L SMARC Module Board Evaluation Board Manual"
 doc_type = "board_manual"
