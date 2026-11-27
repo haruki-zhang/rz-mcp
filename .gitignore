@@ -2,8 +2,10 @@
 .venv/
 __pycache__/
 *.pyc
-# Generated (rebuild with `python -m rzmcp.build`); data/.token is a secret
-data/
+# Runtime data; data/.token is a secret. Only the document index rz.db is tracked
+# (rebuild with `python -m rzmcp.build`)
+data/*
+!data/rz.db
 # Raw vendor documents (872 MB, read-only, tracked by catalog/manifest.toml instead)
 docs/
 # Licensed Renesas software packages (graphics / codec / security): read-only, registered with sha256 in
