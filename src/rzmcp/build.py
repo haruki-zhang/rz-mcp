@@ -38,6 +38,10 @@ def sanity(db: Path) -> tuple[list[str], list[str]]:
         errors.append(f"text-indexed documents {n} != expected {want_pdf}")
     if one("SELECT COUNT(*) FROM chunk_fts WHERE chunk_fts MATCH 'register'") == 0:
         errors.append("full-text index returns nothing for 'register'")
+    for d in m["documents"]:
+        if "pinfunction" in d.get("index", []) and \
+                one(f"SELECT COUNT(*) FROM chunk WHERE doc_id='{d['id']}' AND locator LIKE 'pin %'") < 50:
+            errors.append(f"{d['id']}: pin function list gave fewer than 50 pin records")
     want_mod = sum(len(d.get("register_modules", [])) for d in m["documents"])
     if (n := one("SELECT COUNT(*) FROM module")) != want_mod:
         errors.append(f"register modules {n} != manifest register_modules {want_mod}")

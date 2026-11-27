@@ -34,6 +34,7 @@
 | D1 | "WDTSET_2 寄存器的地址和位域是什么" | 调用 `lookup_register` | 给出地址、复位值、位域，并注明 doc_id、Rev、页码 |
 | D2 | "RZ/G3L 的启动模式引脚怎么设置" | `search_docs`，再用 `get_section` 或 `read_pages` 读原文 | 回答引用了原文页码，不是只凭检索片段 |
 | D3 | 问一个尚未结构化的模块的寄存器 | `lookup_register` 如实返回"没有"，agent 转用 `search_docs` | 不凭记忆编造数值 |
+| D4 | "PM4 的 function 5 是什么，能和哪些引脚一起用" | `search_docs`，命中引脚功能表 `LLWEB-20218308-02` 的 PM4_AWO 记录（整条显示） | 答出 RSCI0_RXD_MISO_SCL，并说明红框组合 PM5–PM7；引用 doc_id 和引脚名 |
 
 ## 4. 上板（可以完全单独使用）
 

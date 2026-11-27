@@ -18,7 +18,7 @@ from pathlib import Path
 from rzmcp import query as Q
 
 HERE = Path(__file__).parent
-HIT_RE = re.compile(r"^\[(\d+)\] (\S+) Rev \S+ \[\w+\] (?:§(\S+) )?(.*?) — hit at (?:p\.(\d+)|BOM row (\d+))", re.M)
+HIT_RE = re.compile(r"^\[(\d+)\] (\S+) Rev \S+ \[\w+\] (?:§(\S+) )?(.*?) — hit at (?:p\.(\d+)|BOM row (\d+)|[^\n(]+)", re.M)
 
 
 def norm(s: str) -> str:

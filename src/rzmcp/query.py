@@ -85,6 +85,21 @@ def _term(t: str) -> str:
     return f'"{t}"'
 
 
+IDENT_RE = re.compile(r"[A-Za-z0-9]+(?:[_\-.][A-Za-z0-9]+)+")
+
+
+def missing_terms(q: str) -> list[str]:
+    """Query words that occur nowhere in the index. Identifiers joined by _ - . (usb_pgood_delay) are
+    checked as one phrase, the other words one by one. Only reported; ranking does not use this."""
+    terms = [(m.group(0), '"' + " ".join(re.findall(r"[A-Za-z0-9]+", m.group(0))) + '"') for m in IDENT_RE.finditer(q)]
+    terms += [(t, _term(t)) for t in re.findall(r"[A-Za-z0-9]+", IDENT_RE.sub(" ", q)) if t.lower() not in STOP]
+    out = []
+    for raw, expr in dict.fromkeys(terms):
+        if raw not in out and not db().execute("SELECT 1 FROM chunk_fts WHERE chunk_fts MATCH ? LIMIT 1", (expr,)).fetchone():
+            out.append(raw)
+    return out
+
+
 def fts_query(q: str, mode: str = "and") -> str | None:
     toks = [t for t in re.findall(r"[A-Za-z0-9]+", q) if t.lower() not in STOP]
     if not toks:
@@ -132,7 +147,7 @@ def search_docs(query: str, device: str = "rzg3l", doc_type: str | None = None, 
         q = fts_query(query, mode)
         if not q:
             return "Query has no searchable words. Use English keywords (the documents are in English)."
-        sql = ("SELECT c.chunk_id, c.doc_id, c.section_id, c.page, c.locator, c.title, c.path, "
+        sql = ("SELECT c.chunk_id, c.doc_id, c.section_id, c.page, c.locator, c.title, c.path, c.body, "
                "snippet(chunk_fts, 2, '«', '»', ' … ', 18) AS snip, bm25(chunk_fts, 10.0, 2.0, 1.0) AS rank "
                "FROM chunk_fts JOIN chunk c ON c.chunk_id = chunk_fts.rowid "
                "JOIN document_device dd ON dd.doc_id = c.doc_id AND dd.device = ? "
@@ -155,22 +170,32 @@ def search_docs(query: str, device: str = "rzg3l", doc_type: str | None = None, 
                 break
         if len(hits) >= limit:
             break
+    missing = missing_terms(query)
     if not hits:
-        return (f"No matches for {query!r} in documents for {device}. Try other keywords, a register/module "
-                "abbreviation, or list_documents to see what is indexed.")
+        return (f"No matches for {query!r} in documents for {device}."
+                + (f" Not found anywhere in the indexed documents: {', '.join(missing)}." if missing else "")
+                + " Try other keywords, a register/module abbreviation, or list_documents to see what is indexed.")
     out = [f"Results for {query!r} (device {device}):"]
+    if missing:
+        out.append(f"Not found anywhere in the indexed documents: {', '.join(missing)}. "
+                   "The hits below match only the other words.")
     for i, (mode, r) in enumerate(hits, 1):
         doc = _doc(r["doc_id"])
         sec = db().execute("SELECT number, page_start, page_end FROM section WHERE section_id=?",
                            (r["section_id"],)).fetchone() if r["section_id"] else None
         where = f"§{sec['number']} " if sec and sec["number"] and not r["title"].startswith(sec["number"]) else ""
         rng = f" (section {_pages(sec['page_start'], sec['page_end'])})" if sec else ""
-        out.append(f"[{i}] {doc['doc_id']} Rev {doc['rev']} [{doc['doc_type']}] {where}{r['title']} — hit at {r['locator']}{rng}"
+        title = r["title"] or f"{doc['title']} page {r['page']}"       # page-level chunks have no FTS title
+        out.append(f"[{i}] {doc['doc_id']} Rev {doc['rev']} [{doc['doc_type']}] {where}{title} — hit at {r['locator']}{rng}"
                    + (" [partial match]" if mode == "or" else ""))
         if r["path"]:
             out.append(f"    in: {r['path']}")
-        out.append("    " + re.sub(r"\s+", " ", r["snip"]).strip())
-    out.append("\nNext: get_section(doc_id, section) for a full section, read_pages(doc_id, start, end) for raw pages.")
+        if r["page"] is None and r["section_id"] is None:       # a table row record (BOM row, pin): short, show it all
+            out.append("    " + r["body"].replace("\n", "\n    "))
+        else:
+            out.append("    " + re.sub(r"\s+", " ", r["snip"]).strip())
+    out.append("\nNext: get_section(doc_id, section) for a full section, read_pages(doc_id, start, end) for raw pages."
+               " Table records (BOM rows, pins) are shown in full above.")
     return _cap("\n".join(out))
 
 
@@ -221,6 +246,8 @@ def get_section(section: str, doc_id: str | None = None, device: str = "rzg3l", 
     doc = _doc(doc_id) if doc_id else None
     if not doc:
         return f"Unknown document {doc_id!r}. Use list_documents."
+    if note := _table_doc(doc):
+        return note
     rows, err = _find_section(doc["doc_id"], section)
     if err:
         return err + " Use get_toc or search_docs to find the right section."
@@ -261,10 +288,24 @@ def get_section(section: str, doc_id: str | None = None, device: str = "rzg3l", 
     return "\n".join(out)
 
 
+def _table_doc(doc: sqlite3.Row) -> str | None:
+    """Documents indexed as row records (BOM, pin function list) have no pages or sections to read."""
+    if db().execute("SELECT 1 FROM chunk WHERE doc_id=? AND (page IS NOT NULL OR section_id IS NOT NULL) LIMIT 1",
+                    (doc["doc_id"],)).fetchone():
+        return None
+    n = db().execute("SELECT COUNT(*) FROM chunk WHERE doc_id=?", (doc["doc_id"],)).fetchone()[0]
+    if not n:
+        return None
+    return (f"{_cite(doc)} {doc['title']} is a table indexed as {n} records (one per row), not pages or sections. "
+            f"Use search_docs(query, doc_id='{doc['doc_id']}') with a pin, signal or part name; the records are shown in full.")
+
+
 def read_pages(doc_id: str, start_page: int, end_page: int | None = None) -> str:
     doc = _doc(doc_id)
     if not doc:
         return f"Unknown document {doc_id!r}. Use list_documents."
+    if note := _table_doc(doc):
+        return note
     start_page = int(start_page)
     end_page = int(end_page or start_page)
     if end_page < start_page:

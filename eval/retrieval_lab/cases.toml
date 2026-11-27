@@ -73,6 +73,32 @@ query = "errata design history S.LOT carrier board"
 doc = "EPMSM-AB-26-0011-1"
 pages = [2]
 
+# ---- pin function list (LLWEB-20218308-02, one record per pin; `locators` names the right record)
+[[pos]]
+id = "PF-01"
+query = "PM4 function 5 RSCI0"
+doc = "LLWEB-20218308-02"
+locators = ["pin PM4_AWO"]
+
+[[pos]]
+id = "PF-02"
+query = "RSCI0_RXD_MISO_SCL pin"
+doc = "LLWEB-20218308-02"
+locators = ["pin PJ0_AWO", "pin P30_AWO", "pin PL0_AWO", "pin PM4_AWO"]
+
+[[pos]]
+id = "PF-03"
+query = "USB20_OVRCUR multiplexed function pin"
+doc = "LLWEB-20218308-02"
+locators = ["pin P30_AWO", "pin PM4_AWO", "pin PG0_ISO", "pin PH2_ISO", "pin PE4_ISO", "pin P20_ISO", "pin P70_ISO",
+            "pin P75_ISO", "pin P82_ISO"]
+
+[[pos]]
+id = "PF-04"
+query = "RIIC red frame combination pins"
+doc = "LLWEB-20218308-02"
+locators = ["notes"]
+
 # ---- negatives: the key term is absent from every indexed page
 [[neg]]
 id = "NG-01"

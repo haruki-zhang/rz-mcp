@@ -7,7 +7,7 @@ from pathlib import Path
 from . import MANIFEST, ROOT
 
 DOC_TYPES = {"hw_manual", "datasheet", "app_note", "quick_start", "board_manual", "schematic", "bom",
-             "errata", "sw_manual", "component_datasheet"}
+             "errata", "sw_manual", "component_datasheet", "pin_list"}
 
 
 def load(path: Path = MANIFEST) -> dict:

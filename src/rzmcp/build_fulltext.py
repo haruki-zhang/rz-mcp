@@ -14,7 +14,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import DB_PATH, ROOT, catalog
+from . import DB_PATH, ROOT, catalog, pinfunc
 from .pdf import compact, norm, outline, raw_page_texts, strip_running_lines
 
 SCHEMA = """
@@ -182,7 +182,9 @@ def index_pdf(con: sqlite3.Connection, d: dict, profile: str) -> tuple[int, int]
         ids.append(cur.lastrowid)
     for si, p, txt in pieces:
         if si is None:
-            title, path, sid = f"{d['title']} page {p}", "", None
+            # no bookmark: empty FTS title (the document title on every page would drown the body text);
+            # the query layer displays "<document title> page N" instead
+            title, path, sid = "", "", None
         else:
             s = secs[si]
             title, path, sid = s["raw"], s["path"], ids[si]
@@ -214,6 +216,13 @@ def index_bom(con: sqlite3.Connection, d: dict) -> int:
     return len(rows)
 
 
+def index_pinfunction(con: sqlite3.Connection, d: dict) -> int:
+    recs = pinfunc.records(ROOT / d["path"])
+    con.executemany("INSERT INTO chunk (doc_id, section_id, page, locator, title, path, body) VALUES (?,?,?,?,?,?,?)",
+                    [(d["id"], None, None, r["locator"], r["title"], d["title"], r["body"]) for r in recs])
+    return len(recs)
+
+
 def build(db: Path) -> None:
     m = catalog.load()
     db.parent.mkdir(parents=True, exist_ok=True)
@@ -235,6 +244,8 @@ def build(db: Path) -> None:
         if "fulltext" in idx and d["path"].lower().endswith(".pdf"):
             np_, ns = index_pdf(con, d, d.get("outline", "none"))
             print(f"  {d['id']:<22} {np_:>5} pages {ns:>5} sections", file=sys.stderr)
+        if "pinfunction" in idx:
+            print(f"  {d['id']:<22} {index_pinfunction(con, d):>5} pin records", file=sys.stderr)
         if "bom" in idx:
             print(f"  {d['id']:<22} {index_bom(con, d):>5} BOM rows", file=sys.stderr)
     con.execute("INSERT INTO chunk_fts (chunk_fts) VALUES ('rebuild')")

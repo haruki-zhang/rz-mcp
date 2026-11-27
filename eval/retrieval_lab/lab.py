@@ -1,6 +1,6 @@
 """Retrieval lab: compare search_docs ranking variants on the same index. Experiment only.
 
-    PYTHONPATH=src python3 eval/retrieval_lab/lab.py [--db data/rz.db] [--alt-db /tmp/rz-alt.db] [-v]
+    PYTHONPATH=src python3 eval/retrieval_lab/lab.py [--db data/rz.db] [-v]
 
 Query sets
   smoke    : eval/smoke_questions.toml, question text as the query (pessimistic), as in run_smoke.py
@@ -10,15 +10,14 @@ Query sets
   caption3 : the same captions cut down to 3 content words (closer to what an agent types)
   neg      : cases.toml `neg`; handled = no hits, or the absent key term is named as not found
 
-Variants (all read-only on --db, except `notitle`, which needs --alt-db: a copy whose page-level chunks
-have an empty FTS title; the lab creates it)
+Variants are read-only on --db. The baseline is what the server does (rzmcp.query.search_docs ranking, and
+rzmcp.query.missing_terms for the "not found anywhere" line); add new variants next to it and compare.
 """
 from __future__ import annotations
 
 import argparse
 import random
 import re
-import shutil
 import sqlite3
 import sys
 from pathlib import Path
@@ -29,11 +28,11 @@ except ModuleNotFoundError:          # Python < 3.11
     import tomli as tomllib
 
 from rzmcp import DB_PATH
-from rzmcp.query import STOP, _term
+from rzmcp import query as Q
+from rzmcp.query import IDENT_RE, STOP, _term
 
 HERE = Path(__file__).parent
 DEVICE = "rzg3l"
-IDENT_RE = re.compile(r"[A-Za-z0-9]+(?:[_\-.][A-Za-z0-9]+)+")
 
 
 def connect(path: Path) -> sqlite3.Connection:
@@ -77,7 +76,7 @@ def run(con, expr: str, weights, limit: int, seen: set, hits: list, mode: str) -
         seen.add(key)
         sec = con.execute("SELECT page_start, page_end FROM section WHERE section_id=?",
                           (r["section_id"],)).fetchone() if r["section_id"] else None
-        hits.append({"doc": r["doc_id"], "page": r["page"], "mode": mode,
+        hits.append({"doc": r["doc_id"], "page": r["page"], "loc": r["locator"], "mode": mode,
                      "ps": sec["page_start"] if sec else r["page"], "pe": sec["page_end"] if sec else r["page"]})
         if len(hits) >= limit:
             return
@@ -85,15 +84,16 @@ def run(con, expr: str, weights, limit: int, seen: set, hits: list, mode: str) -
 
 def search(con, q: str, limit: int = 8, weights=(10.0, 2.0, 1.0), phrase: bool = False,
            gate: bool = False) -> tuple[list[dict], list[str]]:
-    """Returns (hits, missing): missing = query terms that occur nowhere in the index (gate only)."""
+    """Returns (hits, missing): missing = query terms that occur nowhere in the index.
+    gate=False (baseline): rank with every term, report missing ones as the server does.
+    gate=True: drop missing terms from the query, and return no hits when a specific term is missing."""
     terms = (terms_phrase if phrase else terms_plain)(q)
     if not terms:
         return [], []
     hits, seen, missing = [], set(), []
-    if gate == "detect":             # rank with the given terms; only report identifiers that occur nowhere
-        return (search(con, q, limit, weights, phrase, False)[0],
-                [raw for raw, e in terms_phrase(q) if df(con, e) == 0])
-    if gate:
+    if not gate:
+        missing = Q.missing_terms(q)
+    else:
         missing = [raw for raw, e in terms if df(con, e) == 0]
         terms = [(raw, e) for raw, e in terms if raw not in missing]
         if not terms:
@@ -119,7 +119,7 @@ def load_smoke() -> list[dict]:
     for q in qs:
         if q["type"] == "negative":
             continue
-        truth = [(s["doc_no"].upper(), set(s.get("pages", []))) for s in q["source"]]
+        truth = [(s["doc_no"].upper(), set(s.get("pages", [])), set()) for s in q["source"]]
         out.append({"id": q["id"], "query": q["question"] if q["question"].isascii() else ascii_query(q["question"]),
                     "truth": truth})
     return out
@@ -127,7 +127,8 @@ def load_smoke() -> list[dict]:
 
 def load_cases() -> tuple[list[dict], list[dict]]:
     c = tomllib.load(open(HERE / "cases.toml", "rb"))
-    pos = [{"id": p["id"], "query": p["query"], "truth": [(p["doc"].upper(), set(p["pages"]))]} for p in c["pos"]]
+    pos = [{"id": p["id"], "query": p["query"],
+            "truth": [(p["doc"].upper(), set(p.get("pages", [])), set(p.get("locators", [])))]} for p in c["pos"]]
     return pos, c["neg"]
 
 
@@ -148,7 +149,7 @@ def load_captions(con, n: int, seed: int = 7) -> tuple[list[dict], list[dict]]:
     full, short = [], []
     rnd = random.Random(seed + 1)
     for doc, text in keys[:n]:
-        truth = [(doc.upper(), caps[(doc, text)])]
+        truth = [(doc.upper(), caps[(doc, text)], set())]
         full.append({"id": f"{doc}:{text[:30]}", "query": text, "truth": truth})
         words = [w for w in dict.fromkeys(re.findall(r"[A-Za-z0-9_]{3,}", text)) if w.lower() not in STOP]
         if len(words) >= 3:
@@ -160,8 +161,12 @@ def load_captions(con, n: int, seed: int = 7) -> tuple[list[dict], list[dict]]:
 # ------------------------------------------------------------------ scoring
 def rank_of(hits: list[dict], truth) -> int | None:
     for i, h in enumerate(hits, 1):
-        for doc, pages in truth:
+        for doc, pages, locs in truth:
             if h["doc"].upper() != doc:
+                continue
+            if locs:                                   # a table record (pin, BOM row) named by its locator
+                if h["loc"] in locs:
+                    return i
                 continue
             if h["page"] is None:                      # BOM row: the document is the answer when no page is given
                 if not pages:
@@ -189,28 +194,14 @@ def score_neg(con, negs: list[dict], **kw) -> tuple[int, list[str]]:
     return ok, detail
 
 
-def make_alt(src: Path, dst: Path) -> None:
-    """Copy of the index in which page-level chunks (no section) do not repeat the document title."""
-    shutil.copy(src, dst)
-    con = sqlite3.connect(dst)
-    con.execute("UPDATE chunk SET title='' WHERE section_id IS NULL AND page IS NOT NULL")
-    con.execute("INSERT INTO chunk_fts (chunk_fts) VALUES ('rebuild')")
-    con.commit()
-    con.close()
-
-
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", type=Path, default=DB_PATH)
-    ap.add_argument("--alt-db", type=Path)
     ap.add_argument("--captions", type=int, default=400)
     ap.add_argument("-v", action="store_true")
     a = ap.parse_args()
     con = connect(a.db)
-    alt = None
-    if a.alt_db:
-        make_alt(a.db, a.alt_db)
-        alt = connect(a.alt_db)
+    Q.set_db(a.db)
     pos, negs = load_cases()
     cap, cap3 = load_captions(con, a.captions)
     sets = {"smoke": load_smoke(), "cases": pos, "caption": cap, "caption3": cap3}
@@ -220,11 +211,6 @@ def main() -> None:
                 ("weights (1,1,1)", con, {"weights": (1.0, 1.0, 1.0)}),
                 ("phrase", con, {"phrase": True}),
                 ("phrase+gate", con, {"phrase": True, "gate": True})]
-    if alt:
-        variants += [("notitle", alt, {}),
-                     ("notitle+detect", alt, {"gate": "detect"}),
-                     ("notitle+phrase+gate", alt, {"phrase": True, "gate": True}),
-                     ("notitle+phrase+gate (5,2,1)", alt, {"phrase": True, "gate": True, "weights": (5.0, 2.0, 1.0)})]
     print(f"{'variant':<30}" + "".join(f"{name + ' n=' + str(len(qs)):<28}" for name, qs in sets.items()) + "neg handled")
     print(f"{'':<30}" + "".join(f"{'h@1  h@3  h@8  MRR':<28}" for _ in sets))
     for label, c, kw in variants:

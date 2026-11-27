@@ -4,8 +4,9 @@
 # live here. The indexer reads ONLY files listed here.
 #
 # doc_type : hw_manual | datasheet | app_note | quick_start | board_manual | schematic | bom
-#            | errata | sw_manual | component_datasheet
-# index    : fulltext (sections + page text + FTS), registers (HW UM register tables), bom (rows)
+#            | errata | sw_manual | component_datasheet | pin_list
+# index    : fulltext (sections + page text + FTS), registers (HW UM register tables), bom (rows),
+#            pinfunction (pin function list .xlsx: one record per pin + one notes record)
 # outline  : bookmarks (PDF bookmarks = section tree) | schematic (use "Design Hierarchy"
 #            bookmarks = sheet names) | none (page-level chunks only)
 schema_version = 1
@@ -97,6 +98,32 @@ boards = []
 confidentiality = "public"
 index = ["fulltext"]
 outline = "bookmarks"
+
+[[documents]]
+id = "LLWEB-20218308-02"
+title = "RZ/G3L, RZ/G3SE Pin Function List"
+doc_type = "pin_list"
+rev = "1.1"
+path = "docs/devices/rzg3l/rzg3l_rzg3se_pinfunction_list_r1.1.xlsx"
+devices = ["rzg3l", "rzg3se"]
+boards = []
+confidentiality = "public"
+index = ["pinfunction"]
+outline = "none"
+note = "Per pin: ball location (14 mm / 17 mm package), power domain, port mode and Function0-15 (PMC=1), pin state at reset and per boot mode, unused-pin handling. Red frames in the sheet (pins that must be used together for RSCI/RSPI/RIIC/SSI/PDM/SPDIF) are carried into each pin record."
+
+[[documents]]
+id = "LLWEB-20218311-02"
+title = "RZ/G3L, RZ/G3SE Ball View (package top view)"
+doc_type = "pin_list"
+rev = "1.1"
+path = "docs/devices/rzg3l/rzg3l_rzg3se_ballview_r1.1.xlsx"
+devices = ["rzg3l", "rzg3se"]
+boards = []
+confidentiality = "public"
+index = []
+outline = "none"
+note = "Not indexed: a ball grid drawing (14 mm and 17 mm packages). Every ball location is also in each pin record of LLWEB-20218308-02."
 
 [[documents]]
 id = "R01AN6110EJ0106"

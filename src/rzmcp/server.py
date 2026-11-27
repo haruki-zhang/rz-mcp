@@ -65,7 +65,9 @@ design (the only decision point) -> implement in the PoC layer, poc_build -> boa
 the docs, poc_package.
 - Documents are English: search with English keywords and register/module abbreviations. Cite doc_id, Rev and \
 page numbers (PDF page indices) from the tool output. Structured registers cover WDT, SCIFA, CPG; for other \
-modules use search_docs and get_section. If something is not found, say so; never fill in values from memory.
+modules use search_docs and get_section. Pin multiplexing (which Function number a signal has on a pin, ball \
+location, reset state, pins that must be used together): search_docs with the pin or signal name, e.g. \
+'PM4 RSCI0'; the hits are records of the pin function list, cite them by doc_id and pin. If something is not found, say so; never fill in values from memory.
 """
 
 DeviceArg = Annotated[str, Field(description="Device id, e.g. 'rzg3l' (default). Filters documents that apply to this device.")]
@@ -104,7 +106,7 @@ def build_server() -> MCPServer:
     @mcp.tool(**ro)
     @_logged
     def list_documents(device: DeviceArg = "rzg3l",
-                       doc_type: Annotated[Optional[str], Field(description="Optional filter: hw_manual, datasheet, app_note, quick_start, board_manual, schematic, bom, errata, sw_manual, component_datasheet")] = None) -> str:
+                       doc_type: Annotated[Optional[str], Field(description="Optional filter: hw_manual, datasheet, app_note, quick_start, board_manual, schematic, bom, errata, sw_manual, component_datasheet, pin_list")] = None) -> str:
         """List the documents indexed for a device (doc_id, type, revision, pages, title) and which modules have
         structured register data. Use this to learn what sources exist or to get a doc_id."""
         return Q.list_documents(device=device, doc_type=doc_type)
@@ -116,9 +118,10 @@ def build_server() -> MCPServer:
                     doc_type: Annotated[Optional[str], Field(description="Optional doc type filter (see list_documents)")] = None,
                     doc_id: Annotated[Optional[str], Field(description="Optional: restrict to one document id")] = None,
                     limit: Annotated[int, Field(description="Max results (1-20)")] = 8) -> str:
-        """Full-text search over all indexed documents (manual sections, schematic sheets, BOM rows).
-        Returns ranked hits with doc_id, revision, section number, page and a snippet. Read the hit with
-        get_section or read_pages before answering; snippets alone are not enough to quote values."""
+        """Full-text search over all indexed documents (manual sections, schematic sheets, BOM rows, pin
+        function list records). Returns ranked hits with doc_id, revision, section number, page and a snippet;
+        BOM rows and pin records are shown in full. Read section/page hits with get_section or read_pages
+        before answering; snippets alone are not enough to quote values."""
         return Q.search_docs(query=query, device=device, doc_type=doc_type, doc_id=doc_id, limit=limit)
 
     @mcp.tool(**ro)
