@@ -1,0 +1,100 @@
+# Retrieval lab cases (experiment only; not wired into the server).
+#
+# pos: agent-style keyword queries with the page(s) that hold the answer. Pages were checked against the
+#      page text in data/rz.db. The ticket-derived ones carry technical content only (no customer data).
+# neg: queries whose identifying term does not occur anywhere in the indexed documents. A good tool says
+#      so (returns nothing, or names the term that was not found) instead of padding with partial matches.
+
+# ---- derived from support tickets (pinmux / boot / USB questions on the RZ/G3L SMARC EVK)
+[[pos]]
+id = "TK-01"
+query = "BOOT[6] SPI0 PDM CAM1 PM4"
+doc = "R01UH1193EJ0100"
+pages = [50, 52]
+
+[[pos]]
+id = "TK-02"
+query = "SER2 M.2 Key E UART"
+doc = "R01UH1077EJ0120"
+pages = [66, 67, 85]
+
+[[pos]]
+id = "TK-03"
+query = "LCD0_VDD_EN LCD0_BKLT_EN SYS[5]"
+doc = "R01UH1193EJ0100"
+pages = [48, 49]
+
+[[pos]]
+id = "TK-04"
+query = "USB2.0 PHY initialization procedure"
+doc = "R01UH1153EJ0110"
+pages = [1866]
+
+[[pos]]
+id = "TK-05"
+query = "USB0_OTG_ID host function role switch"
+doc = "R01UH1153EJ0110"
+pages = [1874]
+
+[[pos]]
+id = "TK-06"
+query = "USB20_VBUSEN OVRCUR P30 P31"
+doc = "R01UH1193EJ0100"
+pages = [57, 58, 59]
+
+[[pos]]
+id = "TK-07"
+query = "boot mode switch eSD eMMC SPI SCIF download"
+doc = "R01US0858EJ0100"
+pages = [13]
+
+[[pos]]
+id = "TK-08"
+query = "USB role swap peripheral host sysfs"
+doc = "R01US0491EJ0117"
+pages = [23]
+
+# ---- documents without bookmarks (page-level chunks)
+[[pos]]
+id = "PL-01"
+query = "current monitor VBUS"
+doc = "EPMSM-AB-26-0011-1"
+pages = [1, 2, 3]
+
+[[pos]]
+id = "PL-02"
+query = "recommended circuit VBUS connection current measurement offset"
+doc = "EPMSM-AB-26-0011-1"
+pages = [3]
+
+[[pos]]
+id = "PL-03"
+query = "errata design history S.LOT carrier board"
+doc = "EPMSM-AB-26-0011-1"
+pages = [2]
+
+# ---- negatives: the key term is absent from every indexed page
+[[neg]]
+id = "NG-01"
+query = "tftp boot U-Boot ethernet"
+key = "tftp"
+
+[[neg]]
+id = "NG-02"
+query = "usb_pgood_delay U-Boot USB"
+key = "usb_pgood_delay"
+
+[[neg]]
+id = "NG-03"
+query = "PWPR BOWI write protect"
+key = "BOWI"
+
+[[neg]]
+id = "NG-04"
+query = "bootcmd environment variable"
+key = "bootcmd"
+
+[[neg]]
+id = "NG-05"
+query = "tftp"
+key = "tftp"
