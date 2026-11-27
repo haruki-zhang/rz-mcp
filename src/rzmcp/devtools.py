@@ -8,7 +8,8 @@ from typing import Annotated, Literal, Optional
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
-from . import jobs
+from . import jobs, yocto
+from . import poc as pocs   # the module; `poc` is a tool parameter name
 
 COMPONENTS = Literal["graphics", "codecs", "security", "multi-os"]
 PocArg = Annotated[str, Field(description="PoC name (the directory name under the configured PoC root), e.g. 'wdt-reboot'")]
@@ -36,7 +37,7 @@ def register(mcp, logged) -> None:
         installed, whether a bitbake build is running, and where the BSP sources (Linux kernel, U-Boot, TF-A,
         meta-renesas, ...) and the build outputs are on disk. Read those sources directly with your own file
         tools. If the project is missing or broken, call yocto_setup."""
-        return _todo("yocto_status", "P3")
+        return yocto.tool_status()
 
     @mcp.tool(**act)
     @logged
@@ -45,7 +46,7 @@ def register(mcp, logged) -> None:
         shared by all PoCs, and install optional components (graphics, codecs, security, multi-os). Reuses an
         existing project and is safe to call again after an interruption. Starts a background job: returns a
         job_id at once; follow it with job_status."""
-        return _todo("yocto_setup", "P3")
+        return yocto.tool_setup(components)
 
     # ------------------------------------------------------------ PoC
     @mcp.tool(**act)
@@ -56,8 +57,11 @@ def register(mcp, logged) -> None:
         repository with a design template (design.md, including the on-board verification plan), a documentation
         template and an empty Yocto layer. Then research with the document tools and the BSP sources (locations
         from yocto_status), write the design and verification plan, and get the user's confirmation before
-        implementing."""
-        return _todo("poc_create", "P4")
+        implementing (only then set the design's first line to 状态：已确认 <date>)."""
+        try:
+            return pocs.create(name, summary)
+        except pocs.PocError as e:
+            return str(e)
 
     @mcp.tool(**ro)
     @logged
@@ -65,7 +69,10 @@ def register(mcp, logged) -> None:
         """Where is a PoC and what to do next (PoC 进度、进行到哪一步、下一步做什么): without a name lists all PoCs;
         with a name shows the current step, the results of the last build, flash and verification, and exactly
         which tool to call next. Use it to pick up a PoC in a new session."""
-        return _todo("poc_status", "P4")
+        try:
+            return pocs.status_text(name)
+        except pocs.PocError as e:
+            return str(e)
 
     @mcp.tool(**act)
     @logged
@@ -75,7 +82,7 @@ def register(mcp, logged) -> None:
         that PoC's layer and configuration first; without one it builds the official BSP image. Starts a
         background job: returns a job_id at once; follow it with job_status. On success the result lists the
         image files (give them to board_flash); on failure an error summary."""
-        return _todo("poc_build", "P3")
+        return yocto.tool_build(poc, image)
 
     @mcp.tool(**act)
     @logged
@@ -83,8 +90,12 @@ def register(mcp, logged) -> None:
                     version: Annotated[str, Field(description="Delivery version label")] = "v1.0") -> str:
         """Package a PoC for delivery (交付包、打包、交付物): layers/, docs/ (Markdown and PDF), image/, README,
         version manifest and checksums. Licensed packages are never included. Starts a background job: returns
-        a job_id at once; follow it with job_status."""
-        return _todo("poc_package", "P4")
+        a job_id at once; follow it with job_status. Refuses (writing nothing) while the docs are still the
+        template, the layer is empty or there is no successful build matching the layers."""
+        try:
+            return pocs.package_start(poc, version)
+        except pocs.PocError as e:
+            return str(e)
 
     # ------------------------------------------------------------ board
     @mcp.tool(**ro)

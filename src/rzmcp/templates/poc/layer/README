@@ -1,0 +1,23 @@
+{LAYER}
+====================
+
+{SUMMARY}
+
+Tested with Renesas RZ Linux BSP Plus for RZ/G3L, MACHINE = "smarc-rzg3l".
+
+
+I. Changes
+==========
+
+
+II. Dependencies
+================
+
+  URI: https://github.com/renesas-rz/meta-renesas
+  layers: meta-rz-bsp
+
+
+III. Adding the layer
+=====================
+
+  bitbake-layers add-layer <path>/{LAYER}

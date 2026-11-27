@@ -1,0 +1,6 @@
+# Prebuilt image exceeds GitHub 100 MB limit; distribute via GitHub Releases
+image/*.wic.gz
+# Delivery packages made by poc_package
+dist/
+# Copy of the last build's image files (poc_build)
+.rz-poc/build/

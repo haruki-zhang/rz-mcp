@@ -176,14 +176,21 @@ rz-mcp 服务器 ── 文档查询层 ── data/rz.db
 | P1 | 骨架（**已完成** 2026-11-26）：`config.toml`、作业框架、服务器改名和说明、全部 12 个新工具的接口定稿（先返回"未实现"）、识别测试脚本 | P0 | 识别测试达标（6.1）；作业框架能跑一个假作业，经历 `waiting_human` 并在服务器重启后仍可查询（结果：识别测试 80/80；`eval/test_jobs.py` 5/5） |
 | S1 | 调研：在 U-Boot 里更新 bootloader 是否可行（见 4.4） | — | 实机结论和日志；确定 `board_flash` 的路径编排 |
 | P2 | 上板：假板子、串口层、`board_status`、`board_flash`（eMMC、QSPI）、`board_exec`、`board_verify` | P1、S1 | 假板子上全部测试通过；实机验收达标（6.2）；全部用例在不存在任何 PoC 的情况下通过 |
-| P3 | Yocto：`yocto_status`、`yocto_setup`（含可选组件）、`poc_build` | P1 | 在空目录上搭出可用项目并构建出官方镜像；已有项目直接复用；中断后重跑能接着做 |
-| P4 | PoC 生命周期和交付：`poc_create`、`poc_status`、模板、`poc_package` | P1；P3 的产物路径约定 | 用一个过去的 PoC 打包，结构与原交付物一致；`poc_status` 在流程每一步都给出正确的下一步 |
+| P3 | Yocto（**已完成** 2026-11-27）：`yocto_status`、`yocto_setup`（含可选组件）、`poc_build` | P1 | 在空目录上搭出可用项目并构建出官方镜像；已有项目直接复用；中断后重跑能接着做（结果：空目录搭建中途取消、重跑接着做完，约 8.5 分钟；官方 core-image-minimal 从零构建 43 分钟成功，9 个产物齐全；构建中再要求构建被拒绝；`eval/test_yocto.py` 10/10） |
+| P4 | PoC 生命周期和交付（**已完成** 2026-11-27）：`poc_create`、`poc_status`、模板、`poc_package` | P1；P3 的产物路径约定 | 用一个过去的 PoC 打包，结构与原交付物一致；`poc_status` 在流程每一步都给出正确的下一步（结果：rzg3l-lowpower-display 打包后的文件树与原交付物一致，另加 versions.json、SHA256SUMS；`eval/test_poc.py` 67/67；新建 PoC → 真实构建 → 打包串通，写板和验证的记录为模拟） |
 | P5 | 端到端验收 | P2、P3、P4 | 见 6.3 |
 | P6 | 寄存器覆盖扩展（与以上并行，持续进行） | P0 | 每新增一个模块，冒烟题同步增加并通过；模块优先级待定（见第 8 节） |
 
 顺序：P1 和 S1 先行 → P2 与 P3 并行（改动的文件不重叠）→ P4 → P5。P6 随时可做。上板是重点，P2 优先分配资源。
 
 **规模约束**：旧版文档以外的代码约 5,000 行（不含测试）。新版同一范围的目标是不超过 3,000 行。超出时先回头检查是否又在过度设计。
+
+### 5.1 P3 / P4 定下的约定（P2 要遵守）
+
+- PoC 仓库 `<poc.root>/<名称>/`：`build.toml`（镜像、可选组件、层、local_conf；`poc_build` 读取，缺的可选组件自动安装）、`design/design.md`（第一行是状态，用户确认后由 agent 改成「状态：已确认 <日期>」）、`design/verify.toml`（`board_verify(plan=<名称>)` 执行它）、`.rz-poc/state.json`（唯一的状态文件）、`.rz-poc/build/`（最近一次成功构建的产物副本，别的构建不会覆盖它）。
+- 每次构建的记录写进 `<项目>/.rz-mcp/last-build.json`，`yocto.last_build()` 读取，是 `board_flash` 不带镜像时的默认值。产物键名见 `yocto.BUILD_FILES`：rootfs、bmap、bl2_emmc(_bin)、bl2_qspi(_bin)、fip(_bin)、flash_writer。
+- `board_flash` 和 `board_verify` 收到 PoC 名称时，用 `poc.record(名称, "flash" / "verify", ...)` 记录结果，格式见 `src/rzmcp/poc.py` 的模块说明。只写 rootfs 时，要把上一次记录里同一启动设备的 bootloader 校验和带过来。
+- 测试用环境变量 `RZ_MCP_CONFIG` 指向另一份配置。
 
 ## 6. 验收
 

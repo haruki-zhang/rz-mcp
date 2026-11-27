@@ -42,6 +42,9 @@ TERMINAL = {"succeeded", "failed", "cancelled"}
 MAX_WAIT = 50                      # seconds per job_status call; stays well below client HTTP timeouts
 KINDS: dict[str, str] = {          # kind -> "module:function"
     "demo": "rzmcp.jobs:_demo",
+    "poc_package": "rzmcp.poc:_package_job",
+    "yocto_setup": "rzmcp.yocto:_setup_job",
+    "poc_build": "rzmcp.yocto:_build_job",
 }
 
 

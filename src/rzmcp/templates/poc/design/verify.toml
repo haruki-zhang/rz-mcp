@@ -1,0 +1,25 @@
+# {TITLE}: on-board verification plan, run by board_verify(plan="{NAME}"). One [[check]] per item of
+# design/design.md section 7. Pass/fail is decided by these fields only:
+#   id, title, requirement   e.g. "V-1", what is checked, the requirement item (design.md section 2)
+#   where                    "linux" (shell on the board over the serial console, root), "host" (shell on the
+#                            host, e.g. ping), "boot" (reboot from Linux and time U-Boot, kernel, login)
+#   run                      the command (linux / host)
+#   expect                   regex the output must contain (linux / host)
+#   expect_rc                required exit status (optional)
+#   max_seconds              time limit (boot: until the login prompt)
+# Replace the examples below with the checks of this PoC.
+
+[[check]]
+id = "V-1"
+title = "Kernel version"
+requirement = "1"
+where = "linux"
+run = "uname -r"
+expect = "^6\\.12\\."
+
+[[check]]
+id = "V-2"
+title = "Boot to the login prompt"
+requirement = "1"
+where = "boot"
+max_seconds = 30

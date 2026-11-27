@@ -1,0 +1,6 @@
+# What poc_build applies to the shared Yocto project for this PoC. Internal: not part of the delivery.
+image = "core-image-minimal"
+components = []                        # optional components: "graphics", "codecs", "security", "multi-os"
+layers = ["layers/{LAYER}"]            # relative to the PoC repository, or absolute
+local_conf = """
+"""

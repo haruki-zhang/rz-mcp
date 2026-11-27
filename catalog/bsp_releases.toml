@@ -1,0 +1,105 @@
+# BSP release the shared Yocto project is built from (src/rzmcp/yocto.py: yocto_status, yocto_setup, poc_build).
+# Layer pins and TEMPLATECONF: Renesas RZ Linux BSP Plus, "How To Build Linux BSP Plus" (RZ/G), RZ/G3L tab.
+# components: what the release's meta-renesas recipes pin for rzg3l-family; yocto_status compares them with the
+# project's meta-renesas to tell this release from another one.
+
+[releases."RZG3L-BSP-1.0.0"]
+device = "rzg3l"
+title = "Renesas RZ Linux BSP Plus for RZ/G3L"
+machine = "smarc-rzg3l"
+yocto = "scarthgap (poky scarthgap-5.0.14)"
+poky_version = "5.0.14"           # DISTRO_VERSION in poky/meta-poky/conf/distro/poky.conf
+template = "meta-renesas/meta-rz-distro/conf/templates/bsp-plus-conf"
+source = "https://renesas-rz.github.io/rz_linux_bsp_plus/RZG/how_to_build_linux_bsp_plus/ (RZ/G3L, RZ/G3SE tab; read 2026-11-25)"
+note = "meta-renesas tag RZG3L-BSP-1.0.0 is the same commit as BSP-PLUS-K6.12-V4.0 (git ls-remote, 2026-11-25)"
+
+layers = [
+  { name = "poky", url = "https://git.yoctoproject.org/git/poky", rev = "7e8674996b0164b07e56bc066d0fba790e627061" },
+  { name = "meta-arm", url = "https://git.yoctoproject.org/meta-arm", rev = "8e0f8af90fefb03f08cd2228cde7a89902a6b37c" },
+  { name = "meta-openembedded", url = "https://git.openembedded.org/meta-openembedded", rev = "89a01c3d9ad1f8fce6aeb4dd0e694cfa28d42099" },
+  { name = "meta-renesas", url = "https://github.com/renesas-rz/meta-renesas", tag = "RZG3L-BSP-1.0.0", rev = "4823845d3a9a772324218ba753a0e7983905c924" },
+]
+
+# Optional components: not part of the official template; installed by yocto_setup(components=[...]) or by
+# poc_build when a PoC's build.toml lists them.
+#   kind = "package": a licensed zip from renesas.com, kept read-only in the configured packages directory
+#                     (config.toml yocto.packages; `file` is relative to it), never in git or a delivery. Checked
+#                     against sha256, then each `extract` member (a tar.gz; "a.zip!b.tar.gz" = a tar.gz inside a
+#                     zip inside the package) is unpacked into the project; only meta-rz-features/ is accepted.
+#   kind = "git":     cloned into <dest> and checked out at <rev>.
+[[releases."RZG3L-BSP-1.0.0".optional]]
+name = "graphics"
+kind = "package"
+part = "RTK0EF0045Z14001ZJ"
+version = "5.1.3.2"
+file = "RZG3L-BSP-1.0.0/RTK0EF0045Z14001ZJ-5.1.3.2_JP.zip"
+sha256 = "6d308d0befe433584fb421f5ca1c4b1cd2dc2148839b3fd186e433b8e1d211e2"
+extract = ["RTK0EF0045Z14001ZJ-5.1.3.2_JP/meta-rz-features-5.1.3.2.tar.gz"]
+layers = ["meta-rz-features/meta-rz-graphics"]
+needed_for = "core-image-weston with the GPU (not needed for core-image-minimal)"
+source = "How To Build (RZ/G3L tab), Step 1: Graphics v5132"
+
+[[releases."RZG3L-BSP-1.0.0".optional]]
+name = "codecs"
+kind = "package"
+part = "RTK0EF0045Z16002ZJ"
+version = "5.1.5.0"
+file = "RZG3L-BSP-1.0.0/RTK0EF0045Z16002ZJ-5.1.5.0_JP.zip"
+sha256 = "b86fa335bec84201cb4f5139e2da0af34264574b509829ce8f50623a56ed3484"
+extract = ["RTK0EF0045Z16002ZJ-5.1.5.0_JP/meta-rz-features_codec-5.1.5.0.tar.gz",
+           "RTK0EF0045Z16002ZJ-5.1.5.0_JP/RTK0EF0239Z00001ZJ-5.1.5.0.zip!meta-rz-features_codec-5.1.5.0_prebuilt.tar.gz"]
+layers = ["meta-rz-features/meta-rz-codecs"]
+needed_for = "video codecs (OMX / GStreamer plugins); the prebuilt archive is part of it"
+source = "How To Build (RZ/G3L tab), Step 1: Video Codec v5150"
+
+[[releases."RZG3L-BSP-1.0.0".optional]]
+name = "security"
+kind = "package"
+part = "RTK0EF0121Z00000ZJ"
+version = "6.12-v1.0"
+file = "RZG3L-BSP-1.0.0/RTK0EF0121Z00000ZJ-11-6.12-v1.0.zip"
+sha256 = "755115198344ab9e5e6b38579e44984b71c120af1cd66b701315ce8f835c24c1"
+extract = ["RTK0EF0121Z00000ZJ-11-6.12-v1.0/meta-rz-features_security.tar.gz"]
+layers = ["meta-rz-features/meta-rz-security"]
+needed_for = "secure boot / OP-TEE / RZ SCE. The PoC's local_conf sets TRUSTED_BOARD_BOOT, ENABLE_SPD_OPTEE, ENABLE_RZ_SCE and its own keys (Security Startup Guide R11AN1073EJ0110)"
+source = "Release note R11UT0130EJ0100: RZ MPU Security Package for RZ/G3L Linux BSP Plus Kernel 6.12 v1.0. Obtaining it needs Renesas' approval"
+
+[[releases."RZG3L-BSP-1.0.0".optional]]
+name = "multi-os"
+kind = "git"
+url = "https://github.com/renesas-rz/meta-rz-multi-os"
+tag = "v4.0.0"
+rev = "8edaac208c3f9757e63852bc761d08c47653248c"
+version = "v4.0.0"
+dest = "meta-rz-features/meta-rz-multi-os"
+layers = ["meta-rz-features/meta-rz-multi-os/meta-rzg3l"]
+needed_for = "CM33 firmware loaded by BL2 (RZ_CM33_FIRMWARE_LOAD), OpenAMP samples"
+source = "https://github.com/renesas-rz/meta-rz-multi-os, tag v4.0.0 ('Add RZ/G3L support for Multi-OS with BSP-PLUS-K6.12-V4.0')"
+
+# The official kernel / U-Boot / TF-A of the release (pins in meta-renesas). `work` is where yocto_setup leaves the
+# fetched and patched source tree (relative to the build directory; '*' = the recipe version directory).
+[releases."RZG3L-BSP-1.0.0".components.kernel]
+recipe_name = "linux-renesas"
+recipe = "meta-rz-bsp/recipes-kernel/linux/linux-renesas_6.12.bb"
+rev_var = "KERNEL_REV"
+rev = "e6c894b7436f14ba9ddda9e5807d3e19e9e2e803"
+branch = "rz-6.12-cip8"
+version = "6.12.46-cip8"
+work = "tmp/work-shared/smarc-rzg3l/kernel-source"
+
+[releases."RZG3L-BSP-1.0.0".components.u-boot]
+recipe_name = "u-boot"
+recipe = "meta-rz-bsp/recipes-bsp/u-boot/u-boot_2024.07.bb"
+rev_var = "UBOOT_REV"
+rev = "16e6324c9125c6c99e762214137c47d9d7b3ea7f"
+version = "2024.07"
+config = "smarc-rzg3l_defconfig"
+work = "tmp/work/smarc_rzg3l-poky-linux/u-boot/*/git"
+
+[releases."RZG3L-BSP-1.0.0".components.tf-a]
+recipe_name = "trusted-firmware-a"
+recipe = "meta-rz-bsp/recipes-bsp/trusted-firmware-a/trusted-firmware-a_2.10.bb"
+rev_var = "TFA_REV"
+rev = "c06209f12ff5d3a94e674a7f46fd01ec76356928"
+version = "2.10"
+work = "tmp/work/smarc_rzg3l-poky-linux/trusted-firmware-a/*/git"

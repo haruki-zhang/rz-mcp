@@ -6,13 +6,15 @@ which key to set.
 """
 from __future__ import annotations
 
+import os
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import ROOT
 
-CONFIG_PATH = ROOT / "config.toml"
+# RZ_MCP_CONFIG points tests (and their job runners, which inherit the environment) at another config file
+CONFIG_PATH = Path(os.environ.get("RZ_MCP_CONFIG") or ROOT / "config.toml")
 JOBS_DIR = ROOT / "data" / "jobs"
 
 
@@ -47,7 +49,8 @@ def _path(v: str | None) -> Path | None:
     return p if p.is_absolute() else ROOT / p
 
 
-def load(path: Path = CONFIG_PATH) -> Config:
+def load(path: Path | None = None) -> Config:
+    path = path or CONFIG_PATH
     if not path.exists():
         return Config(path=path, exists=False)
     with open(path, "rb") as f:
